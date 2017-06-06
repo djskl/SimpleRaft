@@ -1,10 +1,10 @@
 package servers
 
 type RaftServer interface {
-	init()	//初始化操作
-	handleVoteReq()		//处理RequestVote RPC
-	handleReceivedMsg()	//处理AppendEntries RPC
-	handleMsgAck()		//处理针对AppendEntries RPC的确认信息
+	Init()				//初始化操作
+	HandleVoteReq()		//处理RequestVote RPC
+	HandleReceivedMsg()	//处理AppendEntries RPC
+	HandleMsgAck()		//处理针对AppendEntries RPC的确认信息
 }
 
 //日志项

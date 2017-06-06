@@ -1,13 +1,24 @@
 package servers
 
 type Leader struct {
-	BaseRole
+	*BaseRole
 	NextIndex  []int
 	MatchIndex []int
 }
 
-func (s *Leader) init() {
-	if s.ID == ""{
-		s.ID =
-	}
+
+func (this *Leader) Init() {
+
+}
+
+func (this *Leader) HandleVoteReq() {
+
+}
+
+func (this *Leader) HandleReceivedMsg() {
+
+}
+
+func (this *Leader) HandleMsgAck() {
+
 }
