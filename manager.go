@@ -19,7 +19,6 @@ func (m *RaftManager) init() {
 	m.rs.Init()
 }
 
-
 func (m *RaftManager) convertToRole(role int) {
 	switch role {
 	case settings.LEADER:
@@ -34,4 +33,23 @@ func (m *RaftManager) convertToRole(role int) {
 	m.rs.Init()
 }
 
+//Vote is used to respond to RequestVote RPC
+func (m *RaftManager) Vote() error {
+	return nil
+}
+
+//AppendLog is used to respond to AppendEntries RPC（with filled log）
+func (m *RaftManager) AppendLog() error {
+	return nil
+}
+
+//HeartBeat is used to respond to AppendEntries RPC（with empty log）
+func (m *RaftManager) HeartBeat() error {
+	return nil
+}
+
+//Command is used to interact with users
+func (m *RaftManager) Command() error {
+	return nil
+}
 
