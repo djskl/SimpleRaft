@@ -17,11 +17,7 @@ import (
 //}
 
 func main()  {
-	dct := map[string]string{
-		"hello": "world",
-	}
-
-	x, y := dct["ees"]
-	fmt.Println(x, y)
-
+	x := 10
+	x -= 1
+	fmt.Println(x)
 }
