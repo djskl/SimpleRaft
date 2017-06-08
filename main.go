@@ -16,25 +16,16 @@ import (
 //	http.Serve(l, nil)
 //}
 
-type TypeError struct {
-	s string
-}
-func (t TypeError) Error() string {
-	return t.s
-}
-
-func getBirthday(age interface{}) (int, error) {
-	val, ok := age.(int)
-	if(!ok){
-		return 0, TypeError{"年龄必须是整数"}
-	}
-	return 2017 - val, nil
-}
 func main()  {
-	age := "hello"
-	_, err := getBirthday(age)
-	if(err != nil){
-		val, ok := err.(TypeError)
-		fmt.Println(val, ok)
+	dct := map[string]string{
+		"one": "1",
+		"two": "2",
 	}
+
+	dct["six"] = "6"
+
+	for k, v := range dct {
+		fmt.Println(k, v)
+	}
+
 }

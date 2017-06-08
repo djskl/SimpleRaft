@@ -20,11 +20,12 @@ func (m *RaftManager) init() {
 }
 
 func (m *RaftManager) convertToRole(role int) {
+	m.rs.SetAlive(false)	//注销当前角色
 	switch role {
 	case settings.LEADER:
 		m.rs = servers.Leader{BaseRole: m.br}
 	case settings.FOLLOWER:
-		m.rs = servers.Follower{BaseRole: m.br}
+		//TODO
 	case settings.CANDIDATE:
 		//TODO
 	default:

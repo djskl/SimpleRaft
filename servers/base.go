@@ -5,6 +5,7 @@ type RaftServer interface {
 	HandleVoteReq(args0 VoteReqArg, args1 *VoteAckArg) error 	//处理RequestVote RPC
 	HandleAppendLogReq(args0 LogAppArg, args1 *LogAckArg) error	//处理AppendEntries RPC
 	HandleCommandReq(cmds string, ok *bool) error				//处理用户(client)请求
+	SetAlive(alive bool)										//改变角色的存活状态
 }
 
 type BaseRole struct {
@@ -16,6 +17,9 @@ type BaseRole struct {
 	//volatile state
 	CommitIndex int
 	LastApplied int
+	//角色是否处于激活状态，供角色启动的子协程参考
+	IsAlive bool
+
 }
 
 //日志项

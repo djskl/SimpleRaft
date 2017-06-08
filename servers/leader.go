@@ -4,8 +4,6 @@ import (
 	"SimpleRaft/settings"
 	"log"
 	"net/rpc"
-	"sync"
-	"errors"
 	"SimpleRaft/utils"
 )
 
@@ -13,10 +11,68 @@ type Leader struct {
 	*BaseRole
 	NextIndex  map[string]int
 	MatchIndex map[string]int
+
+	chan_newlog chan int 	//当有新日志到来时激活日志复制服务
+	log_commits []int		//对应日志已复制成功的机器数量
 }
 
 func (this *Leader) Init() error {
+	this.IsAlive = true
+	this.chan_newlog = make(chan int)
+	this.MatchIndex = make(map[string]int)
+	this.NextIndex = make(map[string]int)
+
+	log_length := len(this.Logs)
+	for _, ip := range settings.AllServers {
+		this.NextIndex[ip] = log_length
+	}
+
 	return nil
+}
+
+//启动日志replicate服务
+func (this *Leader) startReplService() {
+	for {
+		log_length := len(this.Logs)
+		for idx := 0; idx < len(settings.AllServers); idx++ {
+			ip := settings.AllServers[idx]
+			if ip == this.IP {
+				continue
+			}
+			next_index := this.NextIndex[ip]
+			if next_index > log_length {
+				continue
+			}
+
+			go this.replicateLog(ip, next_index)
+		}
+	}
+}
+
+func (this *Leader) replicateLog(ip string, next_index int) {
+	nextLogIdx := this.NextIndex[ip]
+	preLog := this.Logs[nextLogIdx-1]
+	toSendEntries := this.Logs[nextLogIdx:]
+
+	inArg := LogAppArg{
+		Term:            this.CurrentTerm,
+		LeaderID:        this.IP,
+		LeaderCommitIdx: this.CommitIndex,
+		PreLogIndex:     nextLogIdx - 1,
+		PreLogTerm:      preLog.Term,
+		Entries:         toSendEntries,
+	}
+	client, err := rpc.DialHTTP("tcp", ip+":"+settings.SERVERPORT)
+	if err != nil {
+		log.Fatal("dialing:", err)
+	}
+
+	err = client.Call("RaftManager.AppendLog", inArg, ack)
+	if err != nil {
+		log.Fatalf("RaftManager AppendLog Error: NextLogIndex: %d (LogTerm: %d)",
+			nextLogIdx, this.CurrentTerm)
+	}
+
 }
 
 func (this *Leader) HandleVoteReq(args0 VoteReqArg, args1 *VoteAckArg) error {
@@ -27,7 +83,11 @@ func (this *Leader) HandleAppendLogReq(args0 LogAppArg, args1 *LogAckArg) error 
 	return nil
 }
 
-//TODO
+func (this *Leader) SetAlive(alive bool) {
+	this.IsAlive = alive
+}
+
+//将用户发出的命令发送到各个机器
 func (this *Leader) HandleCommandReq(cmds string, success *bool) error {
 
 	var cmts int
@@ -59,47 +119,17 @@ func (this *Leader) HandleCommandReq(cmds string, success *bool) error {
 		}(ip)
 
 		for {
-			isOK := <- ok_chan
+			isOK := <-ok_chan
 			if isOK {
-				if cmts++;cmts>1{
+				if cmts++; cmts > 1 {
 					*success = true
 					return nil
 				}
-			}else{
+			} else {
 				*success = false
 				return utils.TermError{"the leader is expired"}
 			}
 		}
 	}
 	return nil
-}
-
-func (this *Leader) replicateLog(ip string) *LogAckArg {
-	nextLogIdx := this.NextIndex[ip]
-	preLog := this.Logs[nextLogIdx-1]
-	toSendEntries := this.Logs[nextLogIdx:]
-
-	inArg := LogAppArg{
-		Term:            this.CurrentTerm,
-		LeaderID:        this.IP,
-		LeaderCommitIdx: this.CommitIndex,
-		PreLogIndex:     nextLogIdx - 1,
-		PreLogTerm:      preLog.Term,
-		Entries:         toSendEntries,
-	}
-	client, err := rpc.DialHTTP("tcp", ip+":"+settings.SERVERPORT)
-	if err != nil {
-		log.Fatal("dialing:", err)
-	}
-
-	logReply := new(LogAckArg)
-
-	err = client.Call("RaftManager.AppendLog", inArg, logReply)
-	if err != nil {
-		log.Fatalf("RaftManager AppendLog Error: NextLogIndex: %d (LogTerm: %d)",
-			nextLogIdx, this.CurrentTerm)
-	}
-
-	return logReply
-
 }
