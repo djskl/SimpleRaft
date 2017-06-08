@@ -6,6 +6,7 @@ import (
 	"net/rpc"
 	"sync"
 	"errors"
+	"SimpleRaft/utils"
 )
 
 type Leader struct {
@@ -26,7 +27,8 @@ func (this *Leader) HandleAppendLogReq(args0 LogAppArg, args1 *LogAckArg) error 
 	return nil
 }
 
-func (this *Leader) HandleCommandReq(cmds string, ok *bool) error {
+//TODO
+func (this *Leader) HandleCommandReq(cmds string, success *bool) error {
 
 	var cmts int
 
@@ -59,19 +61,16 @@ func (this *Leader) HandleCommandReq(cmds string, ok *bool) error {
 		for {
 			isOK := <- ok_chan
 			if isOK {
-				if cmts++;cmts>2{
-					*ok = true
+				if cmts++;cmts>1{
+					*success = true
 					return nil
 				}
 			}else{
-
+				*success = false
+				return utils.TermError{"the leader is expired"}
 			}
 		}
-
 	}
-
-
-
 	return nil
 }
 
