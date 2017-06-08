@@ -14,7 +14,7 @@ type RaftManager struct {
 
 func (m *RaftManager) init() {
 	server_id := utils.GetUUID(settings.UUIDSIZE)
-	m.br = &servers.BaseRole{ID: server_id}
+	m.br = &servers.BaseRole{IP: server_id}
 	m.rs = servers.Follower{m.br}
 	m.rs.Init()
 }
