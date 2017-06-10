@@ -76,7 +76,7 @@ type LogAppArg struct {
 
 type LogAckArg struct {
 	Term int
-	index int
 	Success bool
+	LastLogIndex int
 }
 

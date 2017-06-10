@@ -1,8 +1,6 @@
 package main
 
-import (
-	"fmt"
-)
+import "fmt"
 
 //func StartService()  {
 //	m := RaftManager{}
@@ -16,20 +14,8 @@ import (
 //	http.Serve(l, nil)
 //}
 
-
 func main() {
-
-	var ch chan int
-
-	if ch == nil{
-		fmt.Println("hello")
-	}
-
-	//go func() {
-	//	ch <- 3
-	//}()
-	//
-	//x := <-ch
-	//
-	//fmt.Println(x)
+	x := 3
+	x--
+	fmt.Println(x)
 }
