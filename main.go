@@ -15,7 +15,5 @@ import "fmt"
 //}
 
 func main() {
-	x := 3
-	x--
-	fmt.Println(x)
+
 }

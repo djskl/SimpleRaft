@@ -4,6 +4,8 @@ import (
 	"SimpleRaft/settings"
 	"log"
 	"net/rpc"
+	"SimpleRaft/db"
+	"SimpleRaft/clog"
 )
 
 type Leader struct {
@@ -15,7 +17,8 @@ type Leader struct {
 	log_commits []int    //index位置的日志已复制成功的机器数量
 
 	chan_clients []chan int //leader确定提交了某项日志后，激活这一组管道
-	chan_newlogs chan int   //客户端添加新日志后，激活这个管道
+	chan_newlogs chan bool  //客户端添加新日志后，激活这个管道
+	chan_commits chan int   //更新了commit后，激活这个管道
 }
 
 func (this *Leader) Init(role_chan chan int) error {
@@ -24,17 +27,22 @@ func (this *Leader) Init(role_chan chan int) error {
 	this.MatchIndex = make(map[string]int)
 	this.NextIndex = make(map[string]int)
 
-	log_length := len(this.Logs)
+	log_length := this.Logs.Size()
 	for _, ip := range settings.AllServers {
 		this.NextIndex[ip] = log_length
 	}
 	return nil
 }
 
-//启动日志replicate服务
-func (this *Leader) startReplService() {
+func (this *Leader) startAllService() {
+	go this.startLogReplService()
+	go this.startLogApplService()
+}
+
+//日志replicate服务
+func (this *Leader) startLogReplService() {
 	for {
-		log_length := len(this.Logs)
+		log_length := this.Logs.Size()
 		for idx := 0; idx < len(settings.AllServers); idx++ {
 			ip := settings.AllServers[idx]
 			if ip == this.IP {
@@ -46,6 +54,21 @@ func (this *Leader) startReplService() {
 			}
 			go this.replicateLog(ip, next_index)
 		}
+
+		<-this.chan_newlogs
+
+	}
+}
+
+//日志应用服务(更新lastApplied)
+func (this *Leader) startLogApplService() {
+	for {
+		for this.LastApplied < this.CommitIndex {
+			_log := this.Logs.Get(this.LastApplied+1)
+			db.WriteToDisk(_log.Command)
+			this.LastApplied++
+		}
+		<-this.chan_commits
 	}
 }
 
@@ -57,12 +80,12 @@ func (this *Leader) replicateLog(ip string, next_index int) {
 	var preidx, pretem int
 
 	if next_index > 0 {
-		preLog := this.Logs[next_index-1]
+		preLog := this.Logs.Get(next_index-1)
 		preidx = next_index - 1
 		pretem = preLog.Term
 	}
 
-	toSendEntries := this.Logs[next_index:]
+	toSendEntries := this.Logs.GetFrom(next_index)
 
 	logReq := LogAppArg{
 		Term:            this.CurrentTerm,
@@ -92,7 +115,6 @@ func (this *Leader) replicateLog(ip string, next_index int) {
 }
 
 func (this *Leader) handleLogAck(ip string, next_index int, logAck *LogAckArg) {
-
 	//处理leader过期的情况
 	if logAck.Term > this.CurrentTerm {
 		this.CurrentTerm = logAck.Term
@@ -109,6 +131,9 @@ func (this *Leader) handleLogAck(ip string, next_index int, logAck *LogAckArg) {
 
 	this.NextIndex[ip] = logAck.LastLogIndex + 1
 	this.MatchIndex[ip] = logAck.LastLogIndex
+
+	this.updateCommitIndex(logAck.LastLogIndex)
+
 }
 
 // If there exists an N such that N > commitIndex,
@@ -120,17 +145,35 @@ func (this *Leader) updateCommitIndex(logIndex int) {
 	}
 
 	for logIndex > this.CommitIndex {
+		_log := this.Logs.Get(logIndex)
+
+		if _log.Term < this.CurrentTerm { //不能提交上一个term的日志
+			return
+		}
+
 		nums := 0
 		for _, match_idx := range this.MatchIndex {
 			if match_idx >= logIndex {
-				if nums++;nums>2 {
+				if nums++; nums > 2 {
 					this.CommitIndex = match_idx
+					this.chan_commits <- this.CommitIndex
 					return
 				}
 			}
 		}
 		logIndex--
 	}
+}
+
+func (this *Leader) HandleCommandReq(cmd string, ok *bool) error {
+	_log := clog.Item{this.CurrentTerm, cmd}
+	this.Logs.Add(_log)
+
+	go func() {
+		this.chan_newlogs <- true
+	}()
+
+	return nil
 }
 
 func (this *Leader) HandleVoteReq(args0 VoteReqArg, args1 *VoteAckArg) error {

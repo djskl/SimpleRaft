@@ -2,6 +2,7 @@ package servers
 
 import (
 	"SimpleRaft/utils"
+	"SimpleRaft/clog"
 )
 
 type RaftServer interface {
@@ -10,6 +11,7 @@ type RaftServer interface {
 	HandleAppendLogReq(args0 LogAppArg, args1 *LogAckArg) error	//处理AppendEntries RPC
 	HandleCommandReq(cmds string, ok *bool) error				//处理用户(client)请求
 	SetAlive(alive bool)										//改变角色的存活状态
+	StartAllService()											//启动当前角色下的所有服务
 }
 
 type BaseRole struct {
@@ -18,7 +20,8 @@ type BaseRole struct {
 	//persistent state
 	CurrentTerm int
 	VotedFor    string
-	Logs        []LogItem
+
+	Logs *clog.Manager
 
 	//volatile state
 	CommitIndex int
@@ -35,6 +38,8 @@ func (this *BaseRole) init(chan_role chan int) {
 		panic("Role Chan has not been initialized")
 	}
 	this.chan_role = chan_role
+	this.Logs = new(clog.Manager)
+	this.Logs.Init()
 	this.active.Set()
 }
 
@@ -44,13 +49,6 @@ func (this *BaseRole) GetAlive() bool {
 
 func (this *BaseRole) SetAlive(alive bool) {
 	this.active.UnSet()
-}
-
-
-//日志项
-type LogItem struct {
-	Term    int
-	Command string
 }
 
 type VoteReqArg struct {
@@ -71,7 +69,7 @@ type LogAppArg struct {
 	PreLogIndex int
 	PreLogTerm int
 	LeaderCommitIdx int
-	Entries []LogItem
+	Entries []clog.Item
 }
 
 type LogAckArg struct {

@@ -1,5 +1,7 @@
 package settings
 
+var DBFILE = "/raftserver/db.dat"
+
 var SERVERPORT string = "5656"
 
 var AllServers = [5]string{
