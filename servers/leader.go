@@ -12,12 +12,15 @@ type Leader struct {
 	NextIndex  map[string]int
 	MatchIndex map[string]int
 
-	chan_newlog chan int 	//当有新日志到来时激活日志复制服务
-	log_commits []int		//对应日志已复制成功的机器数量
+	chan_newlog chan int //当有新日志到来时激活日志复制服务
+	log_commits []int    //index位置的日志已复制成功的机器数量
+
+	chan_clients []chan int	//leader确定提交了某项日志后，激活这一组管道
+	chan_newlogs chan int	//客户端添加新日志后，激活这个管道
 }
 
 func (this *Leader) Init() error {
-	this.IsAlive = true
+	this.BaseRole.init()	//相当于调用父类的构造函数
 	this.chan_newlog = make(chan int)
 	this.MatchIndex = make(map[string]int)
 	this.NextIndex = make(map[string]int)
@@ -26,7 +29,6 @@ func (this *Leader) Init() error {
 	for _, ip := range settings.AllServers {
 		this.NextIndex[ip] = log_length
 	}
-
 	return nil
 }
 
@@ -43,35 +45,55 @@ func (this *Leader) startReplService() {
 			if next_index > log_length {
 				continue
 			}
-
 			go this.replicateLog(ip, next_index)
 		}
 	}
 }
 
 func (this *Leader) replicateLog(ip string, next_index int) {
-	nextLogIdx := this.NextIndex[ip]
-	preLog := this.Logs[nextLogIdx-1]
-	toSendEntries := this.Logs[nextLogIdx:]
+	preLog := this.Logs[next_index-1]
+	toSendEntries := this.Logs[next_index:]
 
-	inArg := LogAppArg{
+	logReq := LogAppArg{
 		Term:            this.CurrentTerm,
 		LeaderID:        this.IP,
 		LeaderCommitIdx: this.CommitIndex,
-		PreLogIndex:     nextLogIdx - 1,
+		PreLogIndex:     next_index - 1,
 		PreLogTerm:      preLog.Term,
 		Entries:         toSendEntries,
 	}
-	client, err := rpc.DialHTTP("tcp", ip+":"+settings.SERVERPORT)
-	if err != nil {
-		log.Fatal("dialing:", err)
+
+	logAck := new(LogAckArg)
+	for {	//如果连接(或RPC调用)失败，就反复尝试
+		client, err := rpc.DialHTTP("tcp", ip+":"+settings.SERVERPORT)
+		if err != nil {
+			log.Printf("failed to connect %s from %s\n", ip, this.IP)
+			continue
+		}
+
+		err = client.Call("RaftManager.AppendLog", logReq, logAck)
+		if err != nil {
+			log.Printf("appendLog failed: %s--->%s", this.IP, ip)
+			continue
+		}
+		break
+	}
+	this.handleLogAck(logAck)
+}
+
+// 1、统计提交成功的次数(commits>=3提交，更新commitIdx时，激活所有正在等待的客户端)；
+// 2、切换角色(currentTerm<followerTerm);
+func (this *Leader) handleLogAck(logAck *LogAckArg) {
+
+	//当前这个leader已经过期了，通知manager将当前角色改为Follower
+	if logAck.Term > this.CurrentTerm {
+		this.CurrentTerm = logAck.Term
+		this.SetAlive(false)
+		this.chan_role <- settings.FOLLOWER	//告诉manager：将当前角色切换为Follower
+		return
 	}
 
-	err = client.Call("RaftManager.AppendLog", inArg, ack)
-	if err != nil {
-		log.Fatalf("RaftManager AppendLog Error: NextLogIndex: %d (LogTerm: %d)",
-			nextLogIdx, this.CurrentTerm)
-	}
+
 
 }
 
@@ -80,56 +102,5 @@ func (this *Leader) HandleVoteReq(args0 VoteReqArg, args1 *VoteAckArg) error {
 }
 
 func (this *Leader) HandleAppendLogReq(args0 LogAppArg, args1 *LogAckArg) error {
-	return nil
-}
-
-func (this *Leader) SetAlive(alive bool) {
-	this.IsAlive = alive
-}
-
-//将用户发出的命令发送到各个机器
-func (this *Leader) HandleCommandReq(cmds string, success *bool) error {
-
-	var cmts int
-
-	ok_chan := make(chan bool)
-
-	for idx := 0; idx < len(settings.AllServers); idx++ {
-		ip := settings.AllServers[idx]
-		if ip == this.IP {
-			continue
-		}
-		go func(ip string) {
-			var rst *LogAckArg
-			rst = this.replicateLog(ip)
-			for {
-				if rst.Term > this.CurrentTerm { //抛出异常，由RaftManager将当前角色设置为Follower
-					ok_chan <- false
-					break
-				}
-
-				if !rst.Success { //因为数据不一致导致数据添加失败(更新nextIndex,然后重试)
-					this.NextIndex[ip] -= 1
-					rst = this.replicateLog(ip)
-				} else {
-					ok_chan <- true
-					break
-				}
-			}
-		}(ip)
-
-		for {
-			isOK := <-ok_chan
-			if isOK {
-				if cmts++; cmts > 1 {
-					*success = true
-					return nil
-				}
-			} else {
-				*success = false
-				return utils.TermError{"the leader is expired"}
-			}
-		}
-	}
 	return nil
 }

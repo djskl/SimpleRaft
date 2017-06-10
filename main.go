@@ -16,16 +16,20 @@ import (
 //	http.Serve(l, nil)
 //}
 
-func main()  {
-	dct := map[string]string{
-		"one": "1",
-		"two": "2",
+
+func main() {
+
+	var ch chan int
+
+	if ch == nil{
+		fmt.Println("hello")
 	}
 
-	dct["six"] = "6"
-
-	for k, v := range dct {
-		fmt.Println(k, v)
-	}
-
+	//go func() {
+	//	ch <- 3
+	//}()
+	//
+	//x := <-ch
+	//
+	//fmt.Println(x)
 }

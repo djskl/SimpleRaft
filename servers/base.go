@@ -1,5 +1,9 @@
 package servers
 
+import (
+	"SimpleRaft/utils"
+)
+
 type RaftServer interface {
 	Init() error												//初始化操作
 	HandleVoteReq(args0 VoteReqArg, args1 *VoteAckArg) error 	//处理RequestVote RPC
@@ -10,17 +14,38 @@ type RaftServer interface {
 
 type BaseRole struct {
 	IP string
+
 	//persistent state
 	CurrentTerm int
 	VotedFor    string
 	Logs        []LogItem
+
 	//volatile state
 	CommitIndex int
 	LastApplied int
-	//角色是否处于激活状态，供角色启动的子协程参考
-	IsAlive bool
 
+	//角色是否处于激活状态，供角色启动的子协程参考
+	active *utils.AtomicBool	//用指针防止copy
+
+	chan_role chan int	//角色管道，由manager初始化，所有角色共享一个
 }
+
+func (this *BaseRole) init(chan_role chan int) {
+	if chan_role == nil {
+		panic("Role Chan has not been initialized")
+	}
+	this.chan_role = chan_role
+	this.active.Set()
+}
+
+func (this *BaseRole) GetAlive() bool {
+	return this.active.IsSet()
+}
+
+func (this *BaseRole) SetAlive(alive bool) {
+	this.active.UnSet()
+}
+
 
 //日志项
 type LogItem struct {
@@ -51,6 +76,7 @@ type LogAppArg struct {
 
 type LogAckArg struct {
 	Term int
+	index int
 	Success bool
 }
 
