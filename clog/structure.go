@@ -17,10 +17,11 @@ func (this *Manager) Init() {
 	this.lock = new(sync.RWMutex)
 }
 
-func (this *Manager) Add(log Item) {
+func (this *Manager) Add(log Item) int {
 	this.lock.Lock()
 	defer this.lock.Unlock()
 	this.logs = append(this.logs, log)
+	return len(this.logs) - 1
 }
 
 func (this *Manager) Size() int {

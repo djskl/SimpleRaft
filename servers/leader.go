@@ -16,9 +16,9 @@ type Leader struct {
 	chan_newlog chan int //当有新日志到来时激活日志复制服务
 	log_commits []int    //index位置的日志已复制成功的机器数量
 
-	chan_clients []chan int //leader确定提交了某项日志后，激活这一组管道
-	chan_newlogs chan bool  //客户端添加新日志后，激活这个管道
-	chan_commits chan int   //更新了commit后，激活这个管道
+	chan_clients map[int]chan int 	//leader确定提交了某项日志后，激活这一组管道
+	chan_newlogs chan bool  		//客户端添加新日志后，激活这个管道
+	chan_commits chan int   		//更新了commit后，激活这个管道
 }
 
 func (this *Leader) Init(role_chan chan int) error {
@@ -157,6 +157,9 @@ func (this *Leader) updateCommitIndex(logIndex int) {
 				if nums++; nums > 2 {
 					this.CommitIndex = match_idx
 					this.chan_commits <- this.CommitIndex
+					for _, ch_client := range this.chan_clients {
+						ch_client <- this.CommitIndex
+					}
 					return
 				}
 			}
@@ -167,11 +170,22 @@ func (this *Leader) updateCommitIndex(logIndex int) {
 
 func (this *Leader) HandleCommandReq(cmd string, ok *bool) error {
 	_log := clog.Item{this.CurrentTerm, cmd}
-	this.Logs.Add(_log)
+	pos := this.Logs.Add(_log)
 
 	go func() {
 		this.chan_newlogs <- true
 	}()
+
+	chan_client := make(chan int)
+	this.chan_clients[pos] = chan_client
+	for {
+		commitIdx := <- chan_client
+		if commitIdx >= pos {
+			*ok = true
+			delete(this.chan_clients, pos)
+			return nil
+		}
+	}
 
 	return nil
 }
