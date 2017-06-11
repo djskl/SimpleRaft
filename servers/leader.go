@@ -6,6 +6,7 @@ import (
 	"net/rpc"
 	"SimpleRaft/db"
 	"SimpleRaft/clog"
+	"time"
 )
 
 type Leader struct {
@@ -16,9 +17,9 @@ type Leader struct {
 	chan_newlog chan int //当有新日志到来时激活日志复制服务
 	log_commits []int    //index位置的日志已复制成功的机器数量
 
-	chan_clients map[int]chan int 	//leader确定提交了某项日志后，激活这一组管道
-	chan_newlogs chan bool  		//客户端添加新日志后，激活这个管道
-	chan_commits chan int   		//更新了commit后，激活这个管道
+	chan_clients map[int]chan int //leader确定提交了某项日志后，激活这一组管道
+	chan_newlogs chan bool        //客户端添加新日志后，激活这个管道
+	chan_commits chan int         //更新了commit后，激活这个管道
 }
 
 func (this *Leader) Init(role_chan chan int) error {
@@ -37,6 +38,7 @@ func (this *Leader) Init(role_chan chan int) error {
 func (this *Leader) startAllService() {
 	go this.startLogReplService()
 	go this.startLogApplService()
+	go this.startHeartbeatService()
 }
 
 //日志replicate服务
@@ -54,9 +56,7 @@ func (this *Leader) startLogReplService() {
 			}
 			go this.replicateLog(ip, next_index)
 		}
-
 		<-this.chan_newlogs
-
 	}
 }
 
@@ -64,11 +64,58 @@ func (this *Leader) startLogReplService() {
 func (this *Leader) startLogApplService() {
 	for {
 		for this.LastApplied < this.CommitIndex {
-			_log := this.Logs.Get(this.LastApplied+1)
+			_log := this.Logs.Get(this.LastApplied + 1)
 			db.WriteToDisk(_log.Command)
 			this.LastApplied++
 		}
 		<-this.chan_commits
+	}
+}
+
+//定时向Follower(candidate)发送心跳检测信息，
+//告诉它们Leader依然在线
+func (this *Leader) startHeartbeatService() {
+	c := time.Tick(100 * time.Millisecond)
+
+	hbReq := LogAppArg{
+		Term:            this.CurrentTerm,
+		LeaderID:        this.IP,
+		LeaderCommitIdx: this.CommitIndex,
+	}
+
+	for _ = range c {
+		for idx := 0; idx < len(settings.AllServers); idx++ {
+			ip := settings.AllServers[idx]
+			go func(ip string, hbReq LogAppArg) {
+				var client *rpc.Client
+				var err error
+				for {
+					client, err = rpc.DialHTTP("tcp", ip+":"+settings.SERVERPORT)
+					if err != nil {
+						log.Printf("failed to connect %s from %s\n", ip, this.IP)
+						continue
+					}
+					break
+				}
+
+				hbAck := new(LogAckArg)
+				for {
+					err = client.Call("RaftManager.HeartBeat", hbReq, hbAck)
+					if err != nil {
+						log.Printf("appendLog failed: %s--->%s", this.IP, ip)
+						continue
+					}
+					break
+				}
+				client.Close()
+
+				if hbAck.Term > this.CurrentTerm {
+					this.CurrentTerm = hbAck.Term
+					this.SetAlive(false)
+					this.chan_role <- settings.FOLLOWER //告诉manager：将当前角色切换为Follower
+				}
+			}(ip, hbReq)
+		}
 	}
 }
 
@@ -80,7 +127,7 @@ func (this *Leader) replicateLog(ip string, next_index int) {
 	var preidx, pretem int
 
 	if next_index > 0 {
-		preLog := this.Logs.Get(next_index-1)
+		preLog := this.Logs.Get(next_index - 1)
 		preidx = next_index - 1
 		pretem = preLog.Term
 	}
@@ -97,13 +144,19 @@ func (this *Leader) replicateLog(ip string, next_index int) {
 	}
 
 	logAck := new(LogAckArg)
-	for { //如果连接(或RPC调用)失败，就反复尝试
-		client, err := rpc.DialHTTP("tcp", ip+":"+settings.SERVERPORT)
+
+	var client *rpc.Client
+	var err error
+	for {
+		client, err = rpc.DialHTTP("tcp", ip+":"+settings.SERVERPORT)
 		if err != nil {
 			log.Printf("failed to connect %s from %s\n", ip, this.IP)
 			continue
 		}
+		break
+	}
 
+	for {
 		err = client.Call("RaftManager.AppendLog", logReq, logAck)
 		if err != nil {
 			log.Printf("appendLog failed: %s--->%s", this.IP, ip)
@@ -111,6 +164,7 @@ func (this *Leader) replicateLog(ip string, next_index int) {
 		}
 		break
 	}
+
 	this.handleLogAck(ip, next_index, logAck)
 }
 
@@ -123,7 +177,7 @@ func (this *Leader) handleLogAck(ip string, next_index int, logAck *LogAckArg) {
 		return
 	}
 
-	//数据不一致导致更新失败
+	//数据不一致，更新next_index重新replicate
 	if !logAck.Success {
 		go this.replicateLog(ip, next_index-1)
 		return
@@ -179,7 +233,7 @@ func (this *Leader) HandleCommandReq(cmd string, ok *bool) error {
 	chan_client := make(chan int)
 	this.chan_clients[pos] = chan_client
 	for {
-		commitIdx := <- chan_client
+		commitIdx := <-chan_client
 		if commitIdx >= pos {
 			*ok = true
 			delete(this.chan_clients, pos)
