@@ -11,3 +11,5 @@ var AllServers = [5]string{
 	"192.168.16.4",
 	"192.168.16.5",
 }
+
+var CurrentIP string = "192.168.16.1"

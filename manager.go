@@ -15,10 +15,10 @@ type RaftManager struct {
 }
 
 func (this *RaftManager) init() {
-	server_id := utils.GetUUID(settings.UUIDSIZE)
-	this.br = &servers.BaseRole{IP: server_id}
+	this.br = &servers.BaseRole{IP: settings.CurrentIP}
 	this.rs = &servers.Follower{this.br}
-	this.rs.Init()
+	this.chan_role = make(chan int)
+	this.rs.Init(this.chan_role)
 }
 
 //通过管道chan_role监听角色变化事件
@@ -30,18 +30,18 @@ func (this *RaftManager) StartRoleService()  {
 }
 
 func (this *RaftManager) convertToRole(role int) {
-	this.rs.SetAlive(false) //注销当前角色
+	this.br.SetAlive(false) //注销当前角色
 	switch role {
 	case settings.LEADER:
 		this.rs = &servers.Leader{BaseRole: this.br}
 	case settings.FOLLOWER:
-		//TODO
+		this.rs = &servers.Follower{BaseRole: this.br}
 	case settings.CANDIDATE:
 		//TODO
 	default:
 		log.Fatalf("the role: %d doesn't exist", role)
 	}
-	this.rs.Init()
+	this.rs.Init(this.chan_role)
 }
 
 //Vote is used to respond to RequestVote RPC

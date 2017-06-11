@@ -35,10 +35,44 @@ func (this *Leader) Init(role_chan chan int) error {
 }
 
 //启动所有服务
-func (this *Leader) startAllService() {
+func (this *Leader) StartAllService() {
 	go this.startLogReplService()
 	go this.startHeartbeatService()
 	go this.startLogApplService()
+}
+
+func (this *Leader) HandleCommandReq(cmd string, ok *bool) error {
+	if !this.active.IsSet() {
+		return nil
+	}
+
+	_log := clog.Item{this.CurrentTerm, cmd}
+	pos := this.Logs.Add(_log)
+
+	go func() {
+		this.chan_newlog <- pos
+	}()
+
+	chan_client := make(chan int)
+	this.chan_clients[pos] = chan_client
+	for {
+		commitIdx := <-chan_client
+		if commitIdx >= pos {
+			*ok = true
+			delete(this.chan_clients, pos)
+			return nil
+		}
+	}
+
+	return nil
+}
+
+func (this *Leader) HandleVoteReq(args0 VoteReqArg, args1 *VoteAckArg) error {
+	return nil
+}
+
+func (this *Leader) HandleAppendLogReq(args0 LogAppArg, args1 *LogAckArg) error {
+	return nil
 }
 
 //日志replicate服务
@@ -254,38 +288,4 @@ func (this *Leader) updateCommitIndex(logIndex int) {
 		}
 		logIndex--
 	}
-}
-
-func (this *Leader) HandleCommandReq(cmd string, ok *bool) error {
-	if !this.active.IsSet() {
-		return nil
-	}
-
-	_log := clog.Item{this.CurrentTerm, cmd}
-	pos := this.Logs.Add(_log)
-
-	go func() {
-		this.chan_newlog <- pos
-	}()
-
-	chan_client := make(chan int)
-	this.chan_clients[pos] = chan_client
-	for {
-		commitIdx := <-chan_client
-		if commitIdx >= pos {
-			*ok = true
-			delete(this.chan_clients, pos)
-			return nil
-		}
-	}
-
-	return nil
-}
-
-func (this *Leader) HandleVoteReq(args0 VoteReqArg, args1 *VoteAckArg) error {
-	return nil
-}
-
-func (this *Leader) HandleAppendLogReq(args0 LogAppArg, args1 *LogAckArg) error {
-	return nil
 }
