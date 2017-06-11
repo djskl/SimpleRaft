@@ -14,11 +14,10 @@ type Leader struct {
 	NextIndex  map[string]int
 	MatchIndex map[string]int
 
-	chan_newlog chan int //当有新日志到来时激活日志复制服务
 	log_commits []int    //index位置的日志已复制成功的机器数量
 
 	chan_clients map[int]chan int //leader确定提交了某项日志后，激活这一组管道
-	chan_newlogs chan bool        //客户端添加新日志后，激活这个管道
+	chan_newlog chan int //当有新日志到来时激活日志复制服务
 	chan_commits chan int         //更新了commit后，激活这个管道
 }
 
@@ -35,15 +34,21 @@ func (this *Leader) Init(role_chan chan int) error {
 	return nil
 }
 
+//启动所有服务
 func (this *Leader) startAllService() {
 	go this.startLogReplService()
-	go this.startLogApplService()
 	go this.startHeartbeatService()
+	go this.startLogApplService()
 }
 
 //日志replicate服务
 func (this *Leader) startLogReplService() {
 	for {
+
+		if !this.active.IsSet() {
+			break
+		}
+
 		log_length := this.Logs.Size()
 		for idx := 0; idx < len(settings.AllServers); idx++ {
 			ip := settings.AllServers[idx]
@@ -56,7 +61,13 @@ func (this *Leader) startLogReplService() {
 			}
 			go this.replicateLog(ip, next_index)
 		}
-		<-this.chan_newlogs
+
+		select {
+		case <-this.chan_newlog:
+			//do nothing
+		case <-time.After(time.Second * 1):
+			//do nothing
+		}
 	}
 }
 
@@ -120,6 +131,11 @@ func (this *Leader) startHeartbeatService() {
 }
 
 func (this *Leader) replicateLog(ip string, next_index int) {
+
+	if !this.active.IsSet() {
+		return
+	}
+
 	if next_index < 0 {
 		return
 	}
@@ -148,6 +164,9 @@ func (this *Leader) replicateLog(ip string, next_index int) {
 	var client *rpc.Client
 	var err error
 	for {
+		if !this.active.IsSet() {
+			return
+		}
 		client, err = rpc.DialHTTP("tcp", ip+":"+settings.SERVERPORT)
 		if err != nil {
 			log.Printf("failed to connect %s from %s\n", ip, this.IP)
@@ -157,6 +176,10 @@ func (this *Leader) replicateLog(ip string, next_index int) {
 	}
 
 	for {
+		if !this.active.IsSet() {
+			client.Close()
+			return
+		}
 		err = client.Call("RaftManager.AppendLog", logReq, logAck)
 		if err != nil {
 			log.Printf("appendLog failed: %s--->%s", this.IP, ip)
@@ -165,10 +188,17 @@ func (this *Leader) replicateLog(ip string, next_index int) {
 		break
 	}
 
+	client.Close()
+
 	this.handleLogAck(ip, next_index, logAck)
 }
 
 func (this *Leader) handleLogAck(ip string, next_index int, logAck *LogAckArg) {
+
+	if !this.active.IsSet() {
+		return
+	}
+
 	//处理leader过期的情况
 	if logAck.Term > this.CurrentTerm {
 		this.CurrentTerm = logAck.Term
@@ -194,6 +224,10 @@ func (this *Leader) handleLogAck(ip string, next_index int, logAck *LogAckArg) {
 // a majority of matchIndex[i] ≥ N and log[N].term == currentTerm:
 // set commitIndex = N
 func (this *Leader) updateCommitIndex(logIndex int) {
+	if !this.active.IsSet() {
+		return
+	}
+
 	if logIndex <= this.CommitIndex {
 		return
 	}
@@ -223,11 +257,15 @@ func (this *Leader) updateCommitIndex(logIndex int) {
 }
 
 func (this *Leader) HandleCommandReq(cmd string, ok *bool) error {
+	if !this.active.IsSet() {
+		return nil
+	}
+
 	_log := clog.Item{this.CurrentTerm, cmd}
 	pos := this.Logs.Add(_log)
 
 	go func() {
-		this.chan_newlogs <- true
+		this.chan_newlog <- pos
 	}()
 
 	chan_client := make(chan int)

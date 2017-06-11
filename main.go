@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"time"
+	"math/rand"
 )
 
 //func StartService()  {
@@ -17,9 +18,11 @@ import (
 //	http.Serve(l, nil)
 //}
 
+func f(ch chan interface{}) interface{} {
+	x := <- ch
+	return x
+}
+
 func main() {
-	c := time.Tick(1 * time.Second)
-	for now := range c {
-		fmt.Printf("%v\n", now)
-	}
+
 }
