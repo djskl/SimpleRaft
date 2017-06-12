@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"time"
 )
 
 //func StartService()  {
@@ -16,14 +17,31 @@ import (
 //	http.Serve(l, nil)
 //}
 
-func f(x []int, y[]int) []int{
+func f(x []int, y []int) []int {
 	x = append(x, y...)
 	return x
 }
 
 func main() {
-	var x []int
-	y := [3]int{4,3,2}
-	x = f(x, y[:])
-	fmt.Println(x)
+	ch_ot := make(chan bool)
+	go func() {
+		for {
+			select {
+			case x := <-ch_ot:
+				fmt.Println(x)
+			case <-time.After(200 * time.Millisecond):
+				fmt.Println("timeout")
+			}
+		}
+	}()
+
+	go func() {
+		for {
+			ch_ot <- true
+			time.Sleep(time.Millisecond*100)
+		}
+	}()
+
+	time.Sleep(time.Second*10)
+
 }

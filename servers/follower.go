@@ -1,27 +1,47 @@
 package servers
 
-import "SimpleRaft/db"
+import (
+	"SimpleRaft/db"
+	"time"
+	"SimpleRaft/settings"
+)
 
 type Follower struct {
 	*BaseRole
-	chan_commits chan int //更新了commit后，激活这个管道
+	chan_commits chan int 	//更新了commit后，激活这个管道
+	chan_timeout chan bool	//定时管道
 }
 
 func (this *Follower) Init(role_chan chan int) error {
 	this.BaseRole.init(role_chan) //相当于调用父类的构造函数
 	this.chan_commits = make(chan int)
+	this.chan_timeout = make(chan bool)
 	return nil
 }
 
 func (this *Follower) StartAllService() {
-
 }
 
 func (this *Follower) HandleVoteReq(args0 VoteReqArg, args1 *VoteAckArg) error {
 	return nil
 }
 
+func (this *Follower) startTimeOutService()  {
+	for {
+		select {
+		case <- this.chan_timeout:
+			//do nothing
+		case <- time.After(time.Duration(settings.TIMEOUT)*time.Millisecond):
+			this.chan_role <- settings.CANDIDATE
+			break
+		}
+	}
+}
+
 func (this *Follower) HandleAppendLogReq(args0 LogAppArg, args1 *LogAckArg) error {
+
+	this.chan_timeout <- true	//重置定时器
+
 	//收到了过期leader的log_rpc
 	if args0.Term > this.CurrentTerm {
 		args1.Term = this.CurrentTerm
