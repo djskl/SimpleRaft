@@ -24,6 +24,13 @@ func (this *Manager) Add(log Item) int {
 	return len(this.logs) - 1
 }
 
+func (this *Manager) Extend(otherLogs []Item) int {
+	this.lock.Lock()
+	defer this.lock.Unlock()
+	this.logs = append(this.logs, otherLogs...)
+	return len(this.logs) - 1
+}
+
 func (this *Manager) Size() int {
 	this.lock.RLock()
 	defer this.lock.RUnlock()

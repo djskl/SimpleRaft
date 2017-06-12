@@ -2,8 +2,6 @@ package main
 
 import (
 	"fmt"
-	"time"
-	"math/rand"
 )
 
 //func StartService()  {
@@ -18,11 +16,14 @@ import (
 //	http.Serve(l, nil)
 //}
 
-func f(ch chan interface{}) interface{} {
-	x := <- ch
+func f(x []int, y[]int) []int{
+	x = append(x, y...)
 	return x
 }
 
 func main() {
-
+	var x []int
+	y := [3]int{4,3,2}
+	x = f(x, y[:])
+	fmt.Println(x)
 }

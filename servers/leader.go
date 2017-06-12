@@ -14,16 +14,19 @@ type Leader struct {
 	NextIndex  map[string]int
 	MatchIndex map[string]int
 
-	log_commits []int    //index位置的日志已复制成功的机器数量
+	log_commits []int    			//index位置的日志已复制成功的机器数量
 
-	chan_clients map[int]chan int //leader确定提交了某项日志后，激活这一组管道
-	chan_newlog chan int //当有新日志到来时激活日志复制服务
-	chan_commits chan int         //更新了commit后，激活这个管道
+	chan_clients map[int]chan int 	//leader确定提交了某项日志后，激活这一组管道
+	chan_newlog chan int 			//当有新日志到来时激活日志复制服务
+	chan_commits chan int         	//更新了commit后，激活这个管道
 }
 
 func (this *Leader) Init(role_chan chan int) error {
 	this.BaseRole.init(role_chan) //相当于调用父类的构造函数
+
 	this.chan_newlog = make(chan int)
+	this.chan_commits = make(chan int)
+
 	this.MatchIndex = make(map[string]int)
 	this.NextIndex = make(map[string]int)
 
@@ -72,6 +75,8 @@ func (this *Leader) HandleVoteReq(args0 VoteReqArg, args1 *VoteAckArg) error {
 }
 
 func (this *Leader) HandleAppendLogReq(args0 LogAppArg, args1 *LogAckArg) error {
+	args1.Term = this.CurrentTerm
+	args1.Success = false
 	return nil
 }
 
@@ -176,7 +181,9 @@ func (this *Leader) replicateLog(ip string, next_index int) {
 
 	var preidx, pretem int
 
-	if next_index > 0 {
+	if next_index == 0 {
+		preidx = -1
+	} else {
 		preLog := this.Logs.Get(next_index - 1)
 		preidx = next_index - 1
 		pretem = preLog.Term
@@ -278,10 +285,12 @@ func (this *Leader) updateCommitIndex(logIndex int) {
 			if match_idx >= logIndex {
 				if nums++; nums > 2 {
 					this.CommitIndex = match_idx
-					this.chan_commits <- this.CommitIndex
-					for _, ch_client := range this.chan_clients {
-						ch_client <- this.CommitIndex
-					}
+					go func() {
+						this.chan_commits <- this.CommitIndex
+						for _, ch_client := range this.chan_clients {
+							ch_client <- this.CommitIndex
+						}
+					}()
 					return
 				}
 			}
