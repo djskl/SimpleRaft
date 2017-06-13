@@ -73,12 +73,30 @@ func (this *Leader) HandleCommandReq(cmd string, ok *bool, leaderIP *string) err
 }
 
 func (this *Leader) HandleVoteReq(args0 VoteReqArg, args1 *VoteAckArg) error {
+
+	args1.Term = this.CurrentTerm
+	args1.VoteGranted = false
+
+	//收到了比自己大的term直接转换为follower
+	if args0.Term > this.CurrentTerm {
+		this.CurrentTerm = args0.Term
+		this.chan_role <- settings.FOLLOWER
+	}
+
 	return nil
 }
 
 func (this *Leader) HandleAppendLogReq(args0 LogAppArg, args1 *LogAckArg) error {
+
 	args1.Term = this.CurrentTerm
 	args1.Success = false
+
+	//收到了比自己大的term直接转换为follower
+	if args0.Term > this.CurrentTerm {
+		this.CurrentTerm = args0.Term
+		this.chan_role <- settings.FOLLOWER
+	}
+
 	return nil
 }
 

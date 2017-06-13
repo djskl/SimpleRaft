@@ -22,12 +22,8 @@ func f(x []int, y []int) []int {
 }
 
 func main() {
+	var x *int32
 
-	x := 10
-	y := 3
-
-	if ( x > 5 ) || ( y > 5 ) {
-		fmt.Println("hello")
-	}
+	fmt.Println(*x)
 
 }
