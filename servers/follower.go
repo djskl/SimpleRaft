@@ -4,6 +4,7 @@ import (
 	"SimpleRaft/db"
 	"time"
 	"SimpleRaft/settings"
+	"math/rand"
 )
 
 type Follower struct {
@@ -26,12 +27,14 @@ func (this *Follower) HandleVoteReq(args0 VoteReqArg, args1 *VoteAckArg) error {
 	return nil
 }
 
+//定时服务，超时即切换到candidate状态
 func (this *Follower) startTimeOutService()  {
 	for {
+		ot := time.Duration(rand.Intn(settings.TIMEOUT_MAX - settings.TIMEOUT_MIN) + settings.TIMEOUT_MIN)
 		select {
 		case <- this.chan_timeout:
 			//do nothing
-		case <- time.After(time.Duration(settings.TIMEOUT)*time.Millisecond):
+		case <- time.After(ot*time.Millisecond):
 			this.chan_role <- settings.CANDIDATE
 			break
 		}

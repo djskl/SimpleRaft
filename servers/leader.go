@@ -125,7 +125,7 @@ func (this *Leader) startLogApplService() {
 //定时向Follower(candidate)发送心跳检测信息，
 //告诉它们Leader依然在线
 func (this *Leader) startHeartbeatService() {
-	c := time.Tick(100 * time.Millisecond)
+	c := time.Tick(settings.HEART_BEATS * time.Millisecond)
 
 	hbReq := LogAppArg{
 		Term:            this.CurrentTerm,

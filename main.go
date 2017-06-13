@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"time"
+	"math/rand"
 )
 
 //func StartService()  {
@@ -23,25 +23,8 @@ func f(x []int, y []int) []int {
 }
 
 func main() {
-	ch_ot := make(chan bool)
-	go func() {
-		for {
-			select {
-			case x := <-ch_ot:
-				fmt.Println(x)
-			case <-time.After(200 * time.Millisecond):
-				fmt.Println("timeout")
-			}
-		}
-	}()
-
-	go func() {
-		for {
-			ch_ot <- true
-			time.Sleep(time.Millisecond*100)
-		}
-	}()
-
-	time.Sleep(time.Second*10)
+	for idx :=10;idx<100;idx++ {
+		fmt.Println(rand.Intn(3000) + 3000)
+	}
 
 }
