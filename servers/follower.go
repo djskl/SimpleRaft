@@ -60,6 +60,7 @@ func (this *Follower) HandleVoteReq(args0 VoteReqArg, args1 *VoteAckArg) error {
 		return nil
 	}
 
+	this.CurrentTerm = args0.Term
 
 	voteGranted := false
 	if this.VotedFor == args0.CandidateID || this.VotedFor == "" {	//比较谁包含的日志记录更新更长
@@ -87,6 +88,7 @@ func (this *Follower) HandleVoteReq(args0 VoteReqArg, args1 *VoteAckArg) error {
 		args1.Term = this.CurrentTerm
 		args1.VoteGranted = false
 	}
+
 	return nil
 }
 
@@ -127,10 +129,6 @@ func (this *Follower) HandleAppendLogReq(args0 LogAppArg, args1 *LogAckArg) erro
 	return nil
 }
 
-func (this *Follower) HandleCommandReq(cmd string, ok *bool) error {
-	return nil
-}
-
 func (this *Follower) handleHeartBeat(args0 LogAppArg, args1 *LogAckArg) error {
 	if args0.LeaderCommitIdx > this.CommitIndex {
 		log_size := this.Logs.Size()
@@ -143,5 +141,11 @@ func (this *Follower) handleHeartBeat(args0 LogAppArg, args1 *LogAckArg) error {
 			this.chan_commits <- this.CommitIndex
 		}()
 	}
+	return nil
+}
+
+func (this *Follower) HandleCommandReq(cmd string, ok *bool, leaderIP *string) error {
+	*ok = false
+	*leaderIP = this.VotedFor
 	return nil
 }

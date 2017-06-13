@@ -44,7 +44,7 @@ func (this *Leader) StartAllService() {
 	go this.startLogApplService()
 }
 
-func (this *Leader) HandleCommandReq(cmd string, ok *bool) error {
+func (this *Leader) HandleCommandReq(cmd string, ok *bool, leaderIP *string) error {
 	if !this.active.IsSet() {
 		return nil
 	}
@@ -66,6 +66,8 @@ func (this *Leader) HandleCommandReq(cmd string, ok *bool) error {
 			return nil
 		}
 	}
+
+	*leaderIP = this.VotedFor
 
 	return nil
 }

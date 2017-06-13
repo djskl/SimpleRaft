@@ -10,7 +10,7 @@ type RaftServer interface {
 	StartAllService()											//启动当前角色下的所有服务
 	HandleVoteReq(args0 VoteReqArg, args1 *VoteAckArg) error 	//处理RequestVote RPC
 	HandleAppendLogReq(args0 LogAppArg, args1 *LogAckArg) error	//处理AppendEntries RPC
-	HandleCommandReq(cmds string, ok *bool) error				//处理用户(client)请求
+	HandleCommandReq(cmds string, ok *bool, leaderIP *string) error				//处理用户(client)请求
 }
 
 type BaseRole struct {
