@@ -1,7 +1,9 @@
 package main
 
 import (
+	"sync"
 	"fmt"
+	"time"
 )
 
 //func StartService()  {
@@ -16,14 +18,116 @@ import (
 //	http.Serve(l, nil)
 //}
 
-func f(x []int, y []int) []int {
-	x = append(x, y...)
-	return x
+type CountWG struct {
+	wg sync.WaitGroup
+	num int
+	wk sync.Mutex
+}
+
+func (this *CountWG) Add(delta int) {
+	this.wk.Lock()
+	defer this.wk.Unlock()
+	this.num += delta
+	this.wg.Add(delta)
+}
+
+func (this *CountWG) Done() {
+	this.wk.Lock()
+	defer this.wk.Unlock()
+	if this.num == 0 {
+		return
+	}
+	this.wg.Done()
+	this.num -= 1
+}
+
+func (this *CountWG) Size() int {
+	return this.num
+}
+
+func (this *CountWG) Wait() {
+	this.wg.Wait()
 }
 
 func main() {
-	var x *int32
+	wg := new(CountWG)
+	wg.Add(1)
 
-	fmt.Println(*x)
+	go func() {
+		defer wg.Done()
+		wg.Add(1)
+		fmt.Println("1")
+		time.Sleep(time.Millisecond*100)
+		go func() {
+			defer wg.Done()
+			wg.Add(2)
+			fmt.Println("2")
+			time.Sleep(time.Millisecond*100)
+
+			go func() {
+				defer wg.Done()
+				fmt.Println("hello")
+				time.Sleep(time.Millisecond*500)
+				fmt.Println("world")
+			}()
+
+			go func() {
+				defer wg.Done()
+				wg.Add(1)
+				fmt.Println("3")
+				time.Sleep(time.Millisecond*100)
+				go func() {
+					defer wg.Done()
+					wg.Add(1)
+					fmt.Println("4")
+					time.Sleep(time.Millisecond*100)
+					go func() {
+						defer wg.Done()
+						wg.Add(1)
+						fmt.Println("5")
+						time.Sleep(time.Millisecond*100)
+						go func() {
+							defer wg.Done()
+							wg.Add(1)
+							fmt.Println("6")
+							time.Sleep(time.Millisecond*100)
+							go func() {
+								defer wg.Done()
+								wg.Add(1)
+								fmt.Println("7")
+								time.Sleep(time.Millisecond*100)
+								go func() {
+									defer wg.Done()
+									wg.Add(1)
+									fmt.Println("8")
+									time.Sleep(time.Millisecond*100)
+									go func() {
+										defer wg.Done()
+										wg.Add(1)
+										fmt.Println("9")
+										time.Sleep(time.Millisecond*100)
+									}()
+								}()
+							}()
+						}()
+					}()
+				}()
+			}()
+		}()
+	}()
+
+	go func() {
+		time.Sleep(time.Millisecond*500)
+		var x int
+		for {
+			if x=wg.Size();x>0{
+				wg.Done()
+			}else{
+				break
+			}
+		}
+	}()
+
+	wg.Wait()
 
 }

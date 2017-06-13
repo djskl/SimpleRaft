@@ -25,7 +25,7 @@ func (this *Candidate) Init(role_chan chan int) error {
 }
 
 func (this *Candidate) startAllService() {
-	go this.startVoteService()
+	this.startVoteService()
 }
 
 func (this *Candidate) startVoteService() {
