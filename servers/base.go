@@ -39,6 +39,8 @@ func (this *BaseRole) init(chan_role chan int) {
 	this.chan_role = chan_role
 	this.Logs = new(clog.Manager)
 	this.Logs.Init()
+
+	this.active = new(utils.AtomicBool)
 	this.active.Set()
 }
 

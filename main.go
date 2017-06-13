@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"math/rand"
 )
 
 //func StartService()  {
@@ -23,8 +22,12 @@ func f(x []int, y []int) []int {
 }
 
 func main() {
-	for idx :=10;idx<100;idx++ {
-		fmt.Println(rand.Intn(3000) + 3000)
+
+	x := 10
+	y := 3
+
+	if ( x > 5 ) || ( y > 5 ) {
+		fmt.Println("hello")
 	}
 
 }
