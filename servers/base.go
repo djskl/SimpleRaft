@@ -60,7 +60,7 @@ type LogAppArg struct {
 	PreLogIndex     int
 	PreLogTerm      int
 	LeaderCommitIdx int
-	Entries         []clog.Item
+	Entries         []clog.LogItem
 }
 
 type LogAckArg struct {
@@ -72,4 +72,9 @@ type LogAckArg struct {
 type RoleState struct {
 	Role int
 	Term int
+}
+
+type CommandAck struct{
+	ok bool
+	leaderIP string
 }

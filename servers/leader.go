@@ -65,7 +65,7 @@ func (this *Leader) HandleCommandReq(cmd string, ok *bool, leaderIP *string) err
 
 	log.Printf("LEADER(%d)：收到客户端请求：%s\n", this.CurrentTerm, cmd)
 
-	_log := clog.Item{this.CurrentTerm, cmd}
+	_log := clog.LogItem{this.CurrentTerm, cmd}
 	pos := this.Logs.Add(_log)
 
 	this.chan_newlog <- pos
@@ -88,7 +88,7 @@ func (this *Leader) HandleCommandReq(cmd string, ok *bool, leaderIP *string) err
 				log.Printf("LEADER(%d)：成功处理：%s\n", this.CurrentTerm, cmd)
 				return nil
 			}
-		case time.After(time.Millisecond * time.Duration(settings.CLIENT_WAIT)):
+		case <-time.After(time.Millisecond * time.Duration(settings.CLIENT_WAIT)):
 			continue
 		}
 

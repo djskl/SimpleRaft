@@ -69,7 +69,7 @@ func (this *Candidate) startVoteService() {
 		return
 	}
 
-	log.Printf("CANDIDATE(%d)：未投出Leader，重新选举...\n", this.CurrentTerm)
+	log.Printf("CANDIDATE(%d)：未选出Leader，重新选举...\n", this.CurrentTerm)
 	rolestate := RoleState{settings.CANDIDATE, this.CurrentTerm}
 	this.chan_role <- rolestate
 }
@@ -96,7 +96,7 @@ func (this *Candidate) requestVote(ip string, logIdx int, logTerm int) {
 		}
 		client, err = rpc.DialHTTP("tcp", ip+":"+settings.SERVERPORT)
 		if err != nil {
-			log.Printf("CANDIDATE(%d)：无法与%s建立连接！！！\n", this.CurrentTerm, ip)
+			//log.Printf("CANDIDATE(%d)：无法与%s建立连接！！！\n", this.CurrentTerm, ip)
 			continue
 		}
 		break
@@ -109,7 +109,7 @@ func (this *Candidate) requestVote(ip string, logIdx int, logTerm int) {
 		}
 		err = client.Call("RaftManager.Vote", voteReq, voteAck)
 		if err != nil {
-			log.Printf("CANDIDATE(%d)：调用%s的Vote方法失败！！！\n", this.CurrentTerm, ip)
+			//log.Printf("CANDIDATE(%d)：调用%s的Vote方法失败！！！\n", this.CurrentTerm, ip)
 			continue
 		}
 		break

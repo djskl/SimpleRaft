@@ -49,7 +49,7 @@ func (this *Follower) startTimeOutService() {
 		case <-this.chan_timeout:
 			//do nothing
 		case <-time.After(ot * time.Millisecond):
-			if !this.active.IsSet() {
+			if this.active.IsSet() {
 				log.Printf("FOLLOWER(%d)：Leader(%s)一直未响应，开始选举...\n", this.CurrentTerm, this.VotedFor)
 				rolestate := RoleState{settings.CANDIDATE, this.CurrentTerm}
 				this.chan_role <- rolestate
@@ -106,7 +106,8 @@ func (this *Follower) HandleVoteReq(args0 VoteReqArg, args1 *VoteAckArg) error {
 		log_length := this.Logs.Size()
 		last_log := this.Logs.Get(log_length - 1)
 
-		switch t := last_log.Term - args0.LastLogTerm {
+		t := last_log.Term - args0.LastLogTerm
+		switch {
 		case t < 0:
 			voteGranted = true
 		case t > 0:
@@ -143,8 +144,9 @@ func (this *Follower) HandleAppendLogReq(args0 LogAppArg, args1 *LogAckArg) erro
 			return nil
 		}
 		select {
-		case this.chan_timeout <- true: //重置定时器
-		case time.After(time.Millisecond * time.Duration(settings.CHANN_WAIT)):
+		case this.chan_timeout <- true:
+			//重置定时器
+		case <-time.After(time.Millisecond * time.Duration(settings.CHANN_WAIT)):
 			continue
 		}
 	}
@@ -209,7 +211,7 @@ func (this *Follower) handleHeartBeat(args0 LogAppArg, args1 *LogAckArg) error {
 				select {
 				case this.chan_commits <- this.CommitIndex:
 					break
-				case time.After(time.Millisecond * time.Duration(settings.COMMIT_WAIT)):
+				case <-time.After(time.Millisecond * time.Duration(settings.COMMIT_WAIT)):
 					continue
 				}
 			}
