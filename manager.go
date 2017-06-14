@@ -18,6 +18,7 @@ type RaftManager struct {
 }
 
 func (this *RaftManager) init() {
+	db.Init()
 	this.AllServers = db.LoadServerIPS(settings.IPFILE)
 	this.CurrentIP = this.AllServers[0]
 	this.br = &servers.BaseRole{IP: this.CurrentIP}
