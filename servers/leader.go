@@ -7,22 +7,31 @@ import (
 	"SimpleRaft/db"
 	"SimpleRaft/clog"
 	"time"
+	"SimpleRaft/utils"
 )
 
 type Leader struct {
 	*BaseRole
+
+	//persistent state
+	CurrentTerm int
+	VotedFor    string
+
 	NextIndex  map[string]int
 	MatchIndex map[string]int
 
-	log_commits []int    			//index位置的日志已复制成功的机器数量
-
-	chan_clients map[int]chan int 	//leader确定提交了某项日志后，激活这一组管道
-	chan_newlog chan int 			//当有新日志到来时激活日志复制服务
-	chan_commits chan int         	//更新了commit后，激活这个管道
+	chan_clients map[int]chan int //leader确定提交了某项日志后，激活这一组管道
+	chan_newlog  chan int         //当有新日志到来时激活日志复制服务
+	chan_commits chan int         //更新了commit后，激活这个管道
 }
 
-func (this *Leader) Init(role_chan chan int) error {
-	this.BaseRole.init(role_chan) //相当于调用父类的构造函数
+func (this *Leader) Init(role_chan chan RoleState) error {
+	this.chan_role = role_chan
+
+	this.VotedFor = this.IP
+
+	this.active = new(utils.AtomicBool)
+	this.active.Set()
 
 	this.chan_newlog = make(chan int)
 	this.chan_commits = make(chan int)
@@ -52,23 +61,30 @@ func (this *Leader) HandleCommandReq(cmd string, ok *bool, leaderIP *string) err
 	_log := clog.Item{this.CurrentTerm, cmd}
 	pos := this.Logs.Add(_log)
 
-	go func() {
-		this.chan_newlog <- pos
-	}()
+	this.chan_newlog <- pos
 
 	chan_client := make(chan int)
 	this.chan_clients[pos] = chan_client
 	for {
-		commitIdx := <-chan_client
-		if commitIdx >= pos {
-			*ok = true
-			delete(this.chan_clients, pos)
-			return nil
+		if !this.active.IsSet() {
+			*ok = false
+			*leaderIP = this.VotedFor
+			break
 		}
+
+		select {
+		case commitIdx := <-chan_client:
+			if commitIdx >= pos {
+				*ok = true
+				*leaderIP = this.IP
+				delete(this.chan_clients, pos)
+				return nil
+			}
+		case time.After(time.Millisecond * time.Duration(settings.CLIENT_WAIT)):
+			continue
+		}
+
 	}
-
-	*leaderIP = this.VotedFor
-
 	return nil
 }
 
@@ -78,9 +94,10 @@ func (this *Leader) HandleVoteReq(args0 VoteReqArg, args1 *VoteAckArg) error {
 	args1.VoteGranted = false
 
 	//收到了比自己大的term直接转换为follower
-	if args0.Term > this.CurrentTerm {
+	if (args0.Term > this.CurrentTerm) && (this.active.IsSet()) {
 		this.CurrentTerm = args0.Term
-		this.chan_role <- settings.FOLLOWER
+		rolestate := RoleState{settings.FOLLOWER, this.CurrentTerm}
+		this.chan_role <- rolestate
 	}
 
 	return nil
@@ -92,9 +109,10 @@ func (this *Leader) HandleAppendLogReq(args0 LogAppArg, args1 *LogAckArg) error 
 	args1.Success = false
 
 	//收到了比自己大的term直接转换为follower
-	if args0.Term > this.CurrentTerm {
+	if args0.Term > this.CurrentTerm && this.active.IsSet() {
 		this.CurrentTerm = args0.Term
-		this.chan_role <- settings.FOLLOWER
+		rolestate := RoleState{settings.FOLLOWER, this.CurrentTerm}
+		this.chan_role <- rolestate
 	}
 
 	return nil
@@ -103,7 +121,6 @@ func (this *Leader) HandleAppendLogReq(args0 LogAppArg, args1 *LogAckArg) error 
 //日志replicate服务
 func (this *Leader) startLogReplService() {
 	for {
-
 		if !this.active.IsSet() {
 			break
 		}
@@ -124,7 +141,7 @@ func (this *Leader) startLogReplService() {
 		select {
 		case <-this.chan_newlog:
 			//do nothing
-		case <-time.After(time.Second * 1):
+		case <-time.After(time.Millisecond*time.Duration(settings.NEWLOG_WAIT)):
 			//do nothing
 		}
 	}
@@ -133,12 +150,21 @@ func (this *Leader) startLogReplService() {
 //日志应用服务(更新lastApplied)
 func (this *Leader) startLogApplService() {
 	for {
+		if !this.active.IsSet() {
+			break
+		}
+
 		for this.LastApplied < this.CommitIndex {
 			_log := this.Logs.Get(this.LastApplied + 1)
 			db.WriteToDisk(_log.Command)
 			this.LastApplied++
 		}
-		<-this.chan_commits
+		select {
+		case <-this.chan_commits:
+			//do nothing
+		case <-time.After(time.Millisecond*time.Duration(settings.NEWLOG_WAIT)):
+			//do nothing
+		}
 	}
 }
 
@@ -154,12 +180,18 @@ func (this *Leader) startHeartbeatService() {
 	}
 
 	for _ = range c {
+		if !this.active.IsSet() {
+			return
+		}
 		for idx := 0; idx < len(settings.AllServers); idx++ {
 			ip := settings.AllServers[idx]
 			go func(ip string, hbReq LogAppArg) {
 				var client *rpc.Client
 				var err error
 				for {
+					if !this.active.IsSet() {
+						return
+					}
 					client, err = rpc.DialHTTP("tcp", ip+":"+settings.SERVERPORT)
 					if err != nil {
 						log.Printf("failed to connect %s from %s\n", ip, this.IP)
@@ -170,6 +202,10 @@ func (this *Leader) startHeartbeatService() {
 
 				hbAck := new(LogAckArg)
 				for {
+					if !this.active.IsSet() {
+						client.Close()
+						return
+					}
 					err = client.Call("RaftManager.HeartBeat", hbReq, hbAck)
 					if err != nil {
 						log.Printf("appendLog failed: %s--->%s", this.IP, ip)
@@ -179,10 +215,10 @@ func (this *Leader) startHeartbeatService() {
 				}
 				client.Close()
 
-				if hbAck.Term > this.CurrentTerm {
+				if hbAck.Term > this.CurrentTerm && this.active.IsSet() {
 					this.CurrentTerm = hbAck.Term
-					this.SetAlive(false)
-					this.chan_role <- settings.FOLLOWER //告诉manager：将当前角色切换为Follower
+					rolestate := RoleState{settings.FOLLOWER, this.CurrentTerm}
+					this.chan_role <- rolestate
 				}
 			}(ip, hbReq)
 		}
@@ -190,7 +226,6 @@ func (this *Leader) startHeartbeatService() {
 }
 
 func (this *Leader) replicateLog(ip string, next_index int) {
-
 	if !this.active.IsSet() {
 		return
 	}
@@ -248,23 +283,20 @@ func (this *Leader) replicateLog(ip string, next_index int) {
 		}
 		break
 	}
-
 	client.Close()
-
 	this.handleLogAck(ip, next_index, logAck)
 }
 
 func (this *Leader) handleLogAck(ip string, next_index int, logAck *LogAckArg) {
-
 	if !this.active.IsSet() {
 		return
 	}
 
 	//处理leader过期的情况
-	if logAck.Term > this.CurrentTerm {
+	if logAck.Term > this.CurrentTerm && this.active.IsSet() {
 		this.CurrentTerm = logAck.Term
-		this.SetAlive(false)
-		this.chan_role <- settings.FOLLOWER //告诉manager：将当前角色切换为Follower
+		rolestate := RoleState{settings.FOLLOWER, this.CurrentTerm}
+		this.chan_role <- rolestate
 		return
 	}
 

@@ -6,26 +6,38 @@ import (
 	"log"
 	"sync/atomic"
 	"time"
+	"math/rand"
+	"SimpleRaft/utils"
 )
 
 type Candidate struct {
 	*BaseRole
+	//persistent state
+	CurrentTerm int
+	VotedFor    string
 	chan_timeout chan bool
 	chan_voteover chan bool
 	total_votes  *int32
 }
 
-func (this *Candidate) Init(role_chan chan int) error {
-	this.BaseRole.init(role_chan)
+func (this *Candidate) Init(role_chan chan RoleState) error {
+	this.chan_role = role_chan
+
+	this.VotedFor = ""
+
+	this.active = new(utils.AtomicBool)
+	this.active.Set()
+
 	this.chan_timeout = make(chan bool)
 	this.chan_voteover = make(chan bool)
+
 	this.total_votes = new(int32)
 	atomic.AddInt32(this.total_votes, 1)	//先投自己一票
 	return nil
 }
 
-func (this *Candidate) startAllService() {
-	this.startVoteService()
+func (this *Candidate) StartAllService() {
+	go this.startVoteService()
 }
 
 func (this *Candidate) startVoteService() {
@@ -42,16 +54,17 @@ func (this *Candidate) startVoteService() {
 		go this.requestVote(ip, lastLogIndex, lastLogTerm)
 	}
 
+	ot := time.Duration(rand.Intn(settings.TIMEOUT_MAX-settings.TIMEOUT_MIN) + settings.TIMEOUT_MIN)
 	select {
 	case <- this.chan_voteover:
 		//do nothing
-	case <- time.After(time.Millisecond):
-		this.chan_role <- settings.CANDIDATE
+	case <- time.After(ot):
+		rolestate := RoleState{settings.CANDIDATE, this.CurrentTerm}
+		this.chan_role <- rolestate
 	}
 }
 
 func (this *Candidate) requestVote(ip string, logIdx int, logTerm int) {
-
 	voteReq := VoteReqArg{
 		this.CurrentTerm,
 		this.IP,
@@ -95,7 +108,8 @@ func (this *Candidate) handleVoteAck(voteAck *VoteAckArg) {
 	if voteAck.Term > this.CurrentTerm {
 		this.CurrentTerm = voteAck.Term
 		this.chan_voteover <- true
-		this.chan_role <- settings.FOLLOWER
+		rolestate := RoleState{settings.FOLLOWER, this.CurrentTerm}
+		this.chan_role <- rolestate
 		return
 	}
 
@@ -105,7 +119,8 @@ func (this *Candidate) handleVoteAck(voteAck *VoteAckArg) {
 		atomic.AddInt32(this.total_votes, 1)
 		if(*this.total_votes > 2){	//选举成功了
 			this.chan_voteover <- true
-			this.chan_role <- settings.LEADER
+			rolestate := RoleState{settings.LEADER, this.CurrentTerm}
+			this.chan_role <- rolestate
 			return
 		}
 	}
@@ -119,7 +134,8 @@ func (this *Candidate) HandleVoteReq(args0 VoteReqArg, args1 *VoteAckArg) error 
 	if args0.Term > this.CurrentTerm {
 		this.CurrentTerm = args0.Term
 		this.chan_voteover <- true
-		this.chan_role <- settings.FOLLOWER
+		rolestate := RoleState{settings.FOLLOWER, this.CurrentTerm}
+		this.chan_role <- rolestate
 	}
 	return nil
 }
@@ -138,7 +154,8 @@ func (this *Candidate) HandleAppendLogReq(args0 LogAppArg, args1 *LogAckArg) err
 	if args0.Term >= this.CurrentTerm {
 		this.CurrentTerm = args0.Term
 		this.chan_voteover <- true
-		this.chan_role <- settings.FOLLOWER
+		rolestate := RoleState{settings.FOLLOWER, this.CurrentTerm}
+		this.chan_role <- rolestate
 	}
 
 	return nil

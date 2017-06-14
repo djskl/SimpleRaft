@@ -5,30 +5,38 @@ import (
 	"time"
 	"SimpleRaft/settings"
 	"math/rand"
+	"SimpleRaft/utils"
 )
 
 type Follower struct {
 	*BaseRole
+	//persistent state
+	CurrentTerm int
+	VotedFor    string
 	chan_commits chan int  //更新了commit后，激活这个管道
 	chan_timeout chan bool //定时管道
 }
 
-func (this *Follower) Init(role_chan chan int) error {
-	this.BaseRole.init(role_chan) //相当于调用父类的构造函数
+func (this *Follower) Init(role_chan chan RoleState) error {
+	this.chan_role = role_chan
+
+	this.active = new(utils.AtomicBool)
+	this.active.Set()
+
 	this.chan_commits = make(chan int)
 	this.chan_timeout = make(chan bool)
 	return nil
 }
 
 func (this *Follower) StartAllService() {
-	go this.startLogApplService()	//日志应用服务
-	go this.startTimeOutService()	//计时服务
+	go this.startLogApplService() //日志应用服务
+	go this.startTimeOutService() //计时服务
 }
 
 //定时服务，超时即切换到candidate状态
 func (this *Follower) startTimeOutService() {
 	for {
-		if !this.active.IsSet(){
+		if !this.active.IsSet() {
 			break
 		}
 		ot := time.Duration(rand.Intn(settings.TIMEOUT_MAX-settings.TIMEOUT_MIN) + settings.TIMEOUT_MIN)
@@ -36,8 +44,9 @@ func (this *Follower) startTimeOutService() {
 		case <-this.chan_timeout:
 			//do nothing
 		case <-time.After(ot * time.Millisecond):
-			if !this.active.IsSet(){
-				this.chan_role <- settings.CANDIDATE
+			if !this.active.IsSet() {
+				rolestate := RoleState{settings.CANDIDATE, this.CurrentTerm}
+				this.chan_role <- rolestate
 			}
 			break
 		}
@@ -47,16 +56,28 @@ func (this *Follower) startTimeOutService() {
 //日志应用服务(更新lastApplied)
 func (this *Follower) startLogApplService() {
 	for {
+		if !this.active.IsSet() {
+			return
+		}
 		for this.LastApplied < this.CommitIndex {
 			_log := this.Logs.Get(this.LastApplied + 1)
 			db.WriteToDisk(_log.Command)
 			this.LastApplied++
 		}
-		<-this.chan_commits
+
+		select {
+		case <-this.chan_commits:
+			//do nothing
+		case <-time.After(time.Millisecond * time.Duration(settings.NEWLOG_WAIT)):
+			//do nothing
+		}
 	}
 }
 
 func (this *Follower) HandleVoteReq(args0 VoteReqArg, args1 *VoteAckArg) error {
+	if !this.active.IsSet() {
+		return nil
+	}
 
 	//过期leader直接拒绝
 	if this.CurrentTerm > args0.Term {
@@ -68,7 +89,7 @@ func (this *Follower) HandleVoteReq(args0 VoteReqArg, args1 *VoteAckArg) error {
 	this.CurrentTerm = args0.Term
 
 	voteGranted := false
-	if this.VotedFor == args0.CandidateID || this.VotedFor == "" {	//比较谁包含的日志记录更新更长
+	if this.VotedFor == args0.CandidateID || this.VotedFor == "" { //比较谁包含的日志记录更新更长
 		log_length := this.Logs.Size()
 		last_log := this.Logs.Get(log_length - 1)
 
@@ -98,8 +119,20 @@ func (this *Follower) HandleVoteReq(args0 VoteReqArg, args1 *VoteAckArg) error {
 }
 
 func (this *Follower) HandleAppendLogReq(args0 LogAppArg, args1 *LogAckArg) error {
+	if !this.active.IsSet() {
+		return nil
+	}
 
-	this.chan_timeout <- true //重置定时器
+	for {
+		if !this.active.IsSet() {
+			return nil
+		}
+		select {
+		case this.chan_timeout <- true: //重置定时器
+		case time.After(time.Millisecond * time.Duration(settings.CHANN_WAIT)):
+			continue
+		}
+	}
 
 	//收到了过期leader的log_rpc
 	if args0.Term > this.CurrentTerm {
@@ -135,6 +168,10 @@ func (this *Follower) HandleAppendLogReq(args0 LogAppArg, args1 *LogAckArg) erro
 }
 
 func (this *Follower) handleHeartBeat(args0 LogAppArg, args1 *LogAckArg) error {
+	if !this.active.IsSet() {
+		return nil
+	}
+
 	if args0.LeaderCommitIdx > this.CommitIndex {
 		log_size := this.Logs.Size()
 		if args0.LeaderCommitIdx < log_size {
@@ -142,9 +179,22 @@ func (this *Follower) handleHeartBeat(args0 LogAppArg, args1 *LogAckArg) error {
 		} else {
 			this.CommitIndex = log_size
 		}
+
 		go func() {
-			this.chan_commits <- this.CommitIndex
+			for {
+				if !this.active.IsSet() {
+					return
+				}
+				select {
+				case this.chan_commits <- this.CommitIndex:
+					break
+				case time.After(time.Millisecond * time.Duration(settings.COMMIT_WAIT)):
+					continue
+				}
+			}
+
 		}()
+
 	}
 	return nil
 }
