@@ -43,12 +43,12 @@ func (this *RaftManager) convertToRole(state servers.RoleState) {
 	switch state.Role {
 	case settings.LEADER:
 		this.rs = &servers.Leader{BaseRole: this.br, CurrentTerm: state.Term, AllServers: this.AllServers}
+	case settings.CANDIDATE:
+		this.rs = &servers.Candidate{BaseRole: this.br, CurrentTerm: state.Term, AllServers: this.AllServers}
 	case settings.FOLLOWER:
 		this.rs = &servers.Follower{BaseRole: this.br, CurrentTerm: state.Term}
-	case settings.CANDIDATE:
-		this.rs = &servers.Candidate{BaseRole: this.br, CurrentTerm: state.Term}
 	default:
-		log.Fatalf("the role: %d doesn't exist", state.Role)
+		log.Fatalf("未知角色：%d\n", state.Role)
 	}
 	this.rs.Init(this.chan_role)
 }

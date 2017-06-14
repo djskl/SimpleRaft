@@ -50,6 +50,7 @@ func (this *Follower) startTimeOutService() {
 			//do nothing
 		case <-time.After(ot * time.Millisecond):
 			if !this.active.IsSet() {
+				log.Printf("FOLLOWER(%d)：Leader(%s)一直未响应，开始选举...\n", this.CurrentTerm, this.VotedFor)
 				rolestate := RoleState{settings.CANDIDATE, this.CurrentTerm}
 				this.chan_role <- rolestate
 			}

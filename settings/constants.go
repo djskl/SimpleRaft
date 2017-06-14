@@ -9,6 +9,8 @@ const COMMIT_WAIT = 300		//300ms
 
 const CHANN_WAIT = 100		//100ms
 
+const MAJORITY = 3	//只允许5台机器
+
 const (
 	LEADER    = iota
 	FOLLOWER
