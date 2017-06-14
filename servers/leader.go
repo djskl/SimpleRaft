@@ -17,12 +17,14 @@ type Leader struct {
 	CurrentTerm int
 	VotedFor    string
 
+	AllServers []string
+	
 	NextIndex  map[string]int
 	MatchIndex map[string]int
 
 	chan_clients map[int]chan int //leader确定提交了某项日志后，激活这一组管道
 	chan_newlog  chan int         //当有新日志到来时激活日志复制服务
-	chan_commits chan int         //更新了commit后，激活这个管道
+	chan_commits chan int         //更新了commit后，激活这个管道	
 }
 
 func (this *Leader) Init(role_chan chan RoleState) error {
@@ -40,7 +42,7 @@ func (this *Leader) Init(role_chan chan RoleState) error {
 	this.NextIndex = make(map[string]int)
 
 	log_length := this.Logs.Size()
-	for _, ip := range settings.AllServers {
+	for _, ip := range this.AllServers {
 		this.NextIndex[ip] = log_length
 	}
 	return nil
@@ -126,8 +128,8 @@ func (this *Leader) startLogReplService() {
 		}
 
 		log_length := this.Logs.Size()
-		for idx := 0; idx < len(settings.AllServers); idx++ {
-			ip := settings.AllServers[idx]
+		for idx := 0; idx < len(this.AllServers); idx++ {
+			ip := this.AllServers[idx]
 			if ip == this.IP {
 				continue
 			}
@@ -183,8 +185,8 @@ func (this *Leader) startHeartbeatService() {
 		if !this.active.IsSet() {
 			return
 		}
-		for idx := 0; idx < len(settings.AllServers); idx++ {
-			ip := settings.AllServers[idx]
+		for idx := 0; idx < len(this.AllServers); idx++ {
+			ip := this.AllServers[idx]
 			go func(ip string, hbReq LogAppArg) {
 				var client *rpc.Client
 				var err error

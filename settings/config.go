@@ -1,15 +1,6 @@
 package settings
 
-var DBFILE = "/raftserver/db.dat"
+var DBFILE string = "/raftserver/db.dat"
+var IPFILE string = "/etc/hosts"
 
 var SERVERPORT string = "5656"
-
-var AllServers = [5]string{
-	"192.168.16.1",
-	"192.168.16.2",
-	"192.168.16.3",
-	"192.168.16.4",
-	"192.168.16.5",
-}
-
-var CurrentIP string = "192.168.16.1"

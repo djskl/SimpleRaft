@@ -1,11 +1,12 @@
 package main
 
 import (
-	"fmt"
 	"net/rpc"
 	"net"
 	"log"
+	"fmt"
 	"net/http"
+	"SimpleRaft/settings"
 )
 
 func StartService()  {
@@ -13,14 +14,13 @@ func StartService()  {
 	m.StartRoleService()
 	rpc.Register(m)
 	rpc.HandleHTTP()
-	l, e := net.Listen("tcp", "127.0.0.1:1234")
+	l, e := net.Listen("tcp", m.CurrentIP + ":" + settings.SERVERPORT)
 	if e != nil {
-		log.Fatal("listen error:", e)
+		log.Fatal(e)
 	}
-	fmt.Println("I'm listening...")
+	fmt.Println("启动服务...")
 	http.Serve(l, nil)
 }
-
 func main() {
 	StartService()
 }

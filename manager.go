@@ -4,6 +4,7 @@ import (
 	"SimpleRaft/servers"
 	"SimpleRaft/settings"
 	"log"
+	"SimpleRaft/db"
 )
 
 type RaftManager struct {
@@ -11,10 +12,15 @@ type RaftManager struct {
 	rs servers.RaftServer
 
 	chan_role chan servers.RoleState //角色管道
+
+	AllServers []string
+	CurrentIP string
 }
 
 func (this *RaftManager) init() {
-	this.br = &servers.BaseRole{IP: settings.CurrentIP}
+	this.AllServers = db.LoadServerIPS(settings.IPFILE)
+	this.CurrentIP = this.AllServers[0]
+	this.br = &servers.BaseRole{IP: this.CurrentIP}
 	this.br.Init()
 	this.rs = &servers.Follower{BaseRole: this.br}
 	this.chan_role = make(chan servers.RoleState)
@@ -35,7 +41,7 @@ func (this *RaftManager) convertToRole(state servers.RoleState) {
 	this.br.SetAlive(false) //注销当前角色
 	switch state.Role {
 	case settings.LEADER:
-		this.rs = &servers.Leader{BaseRole: this.br, CurrentTerm: state.Term}
+		this.rs = &servers.Leader{BaseRole: this.br, CurrentTerm: state.Term, AllServers: this.AllServers}
 	case settings.FOLLOWER:
 		this.rs = &servers.Follower{BaseRole: this.br, CurrentTerm: state.Term}
 	case settings.CANDIDATE:
