@@ -23,12 +23,13 @@ type Candidate struct {
 
 	//角色是否处于激活状态，供角色启动的子协程参考
 	//用指针防止copy
-	active *utils.AtomicBool
-	chan_role chan RoleState //角色管道
+	active    *utils.AtomicBool
+	chan_role *chan RoleState //角色管道
 }
 
 func (this *Candidate) Init() error {
-	this.chan_role = make(chan RoleState)
+	tmp := make(chan RoleState)
+	this.chan_role = &tmp
 
 	this.VotedFor = ""
 
@@ -46,7 +47,7 @@ func (this *Candidate) Init() error {
 	return nil
 }
 
-func (this *Candidate) SetAlive(alive bool){
+func (this *Candidate) SetAlive(alive bool) {
 	this.active.SetTo(alive)
 }
 
@@ -54,7 +55,7 @@ func (this *Candidate) GetAlive() bool {
 	return this.active.IsSet()
 }
 
-func (this *Candidate) GetRoleChan() chan RoleState {
+func (this *Candidate) GetRoleChan() *chan RoleState {
 	return this.chan_role
 }
 
@@ -79,7 +80,7 @@ func (this *Candidate) startVoteService() {
 
 	ot := time.Duration(rand.Intn(settings.TIMEOUT_MAX-settings.TIMEOUT_MIN) + settings.TIMEOUT_MIN)
 
-	<-time.After(ot*time.Millisecond)
+	<-time.After(ot * time.Millisecond)
 
 	if !this.active.IsSet() {
 		return
@@ -87,7 +88,7 @@ func (this *Candidate) startVoteService() {
 
 	log.Printf("CANDIDATE(%d)：未选出Leader，重新选举...\n", this.CurrentTerm)
 	rolestate := RoleState{settings.CANDIDATE, this.CurrentTerm}
-	this.chan_role <- rolestate
+	*this.chan_role <- rolestate
 }
 
 func (this *Candidate) requestVote(ip string, logIdx int, logTerm int) {
@@ -113,7 +114,7 @@ func (this *Candidate) requestVote(ip string, logIdx int, logTerm int) {
 		client, err = rpc.DialHTTP("tcp", ip+":"+settings.SERVERPORT)
 		if err != nil {
 			log.Printf("CANDIDATE(%d)：无法与%s建立连接！！！\n", this.CurrentTerm, ip)
-			time.Sleep(time.Second*time.Duration(settings.RPC_WAIT))
+			time.Sleep(time.Second * time.Duration(settings.RPC_WAIT))
 			continue
 		}
 		break
@@ -124,10 +125,10 @@ func (this *Candidate) requestVote(ip string, logIdx int, logTerm int) {
 			client.Close()
 			return
 		}
-		err = client.Call("RaftManager.Vote", voteReq, voteAck)
+		err = client.Call("RaftRPC.Vote", voteReq, voteAck)
 		if err != nil {
 			log.Printf("CANDIDATE(%d)：调用%s的Vote方法失败！！！\n", this.CurrentTerm, ip)
-			time.Sleep(time.Second*time.Duration(settings.RPC_WAIT))
+			time.Sleep(time.Second * time.Duration(settings.RPC_WAIT))
 			continue
 		}
 		break
@@ -150,19 +151,15 @@ func (this *Candidate) handleVoteAck(voteAck *VoteAckArg) {
 		log.Printf("CANDIDATE(%d)：Term过期了，转为Follower...\n", this.CurrentTerm)
 		this.CurrentTerm = voteAck.Term
 		rolestate := RoleState{settings.FOLLOWER, this.CurrentTerm}
-		go func() {
-			for {
-				if !this.active.IsSet() {
-					return
-				}
-				select {
-				case this.chan_role <- rolestate:
-					//do nothing
-				case <-time.After(time.Millisecond * time.Duration(settings.CHANN_WAIT)):
-					continue
-				}
-			}
-		}()
+		if !this.active.IsSet() {
+			return
+		}
+		select {
+		case *this.chan_role <- rolestate:
+			//do nothing
+		case <-time.After(time.Millisecond * time.Duration(settings.CHANN_WAIT)):
+			//
+		}
 		return
 	}
 
@@ -174,19 +171,15 @@ func (this *Candidate) handleVoteAck(voteAck *VoteAckArg) {
 		if *this.total_votes >= settings.MAJORITY { //选举成功了
 			log.Printf("CANDIDATE(%d)：选举成功(票数:%d)，转为Leader\n", this.CurrentTerm, *this.total_votes)
 			rolestate := RoleState{settings.LEADER, this.CurrentTerm}
-			go func() {
-				for {
-					if !this.active.IsSet() {
-						return
-					}
-					select {
-					case this.chan_role <- rolestate:
-						//do nothing
-					case <-time.After(time.Millisecond * time.Duration(settings.CHANN_WAIT)):
-						continue
-					}
-				}
-			}()
+			if !this.active.IsSet() {
+				return
+			}
+			select {
+			case *this.chan_role <- rolestate:
+				//
+			case <-time.After(time.Millisecond * time.Duration(settings.CHANN_WAIT)):
+				//
+			}
 		}
 	}
 }
@@ -203,19 +196,15 @@ func (this *Candidate) HandleVoteReq(args0 VoteReqArg, args1 *VoteAckArg) error 
 		log.Printf("CANDIDATE(%d)：Term过期了，转为Follower...\n", this.CurrentTerm)
 		this.CurrentTerm = args0.Term
 		rolestate := RoleState{settings.FOLLOWER, this.CurrentTerm}
-		go func() {
-			for {
-				if !this.active.IsSet() {
-					return
-				}
-				select {
-				case this.chan_role <- rolestate:
-					//do nothing
-				case <-time.After(time.Millisecond * time.Duration(settings.CHANN_WAIT)):
-					continue
-				}
-			}
-		}()
+		if !this.active.IsSet() {
+			return nil
+		}
+		select {
+		case *this.chan_role <- rolestate:
+			//do nothing
+		case <-time.After(time.Millisecond * time.Duration(settings.CHANN_WAIT)):
+			//
+		}
 	}
 	return nil
 }
@@ -236,20 +225,15 @@ func (this *Candidate) HandleAppendLogReq(args0 LogAppArg, args1 *LogAckArg) err
 		log.Printf("CANDIDATE(%d)：Term过期了，转为Follower...\n", this.CurrentTerm)
 		this.CurrentTerm = args0.Term
 		rolestate := RoleState{settings.FOLLOWER, this.CurrentTerm}
-		go func() {
-			for {
-				if !this.active.IsSet() {
-					return
-				}
-				select {
-				case this.chan_role <- rolestate:
-					//do nothing
-				case <-time.After(time.Millisecond * time.Duration(settings.CHANN_WAIT)):
-					continue
-				}
-			}
-		}()
+		if !this.active.IsSet() {
+			return nil
+		}
+		select {
+		case *this.chan_role <- rolestate:
+			//do nothing
+		case <-time.After(time.Millisecond * time.Duration(settings.CHANN_WAIT)):
+			//do nothing
+		}
 	}
-
 	return nil
 }

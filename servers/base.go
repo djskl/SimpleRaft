@@ -13,7 +13,7 @@ type RaftServer interface {
 
 	GetAlive() bool
 	SetAlive(alive bool)
-	GetRoleChan() chan RoleState
+	GetRoleChan() *chan RoleState
 }
 
 type BaseRole struct {

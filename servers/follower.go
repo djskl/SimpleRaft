@@ -12,19 +12,20 @@ import (
 type Follower struct {
 	*BaseRole
 	//persistent state
-	CurrentTerm int
-	VotedFor    string
+	CurrentTerm  int
+	VotedFor     string
 	chan_commits chan int  //更新了commit后，激活这个管道
 	chan_timeout chan bool //定时管道
 
 	//角色是否处于激活状态，供角色启动的子协程参考
 	//用指针防止copy
-	active *utils.AtomicBool
-	chan_role chan RoleState //角色管道
+	active    *utils.AtomicBool
+	chan_role *chan RoleState //角色管道
 }
 
 func (this *Follower) Init() error {
-	this.chan_role = make(chan RoleState)
+	tmp := make(chan RoleState)
+	this.chan_role = &tmp
 
 	this.active = new(utils.AtomicBool)
 	this.active.Set()
@@ -37,7 +38,7 @@ func (this *Follower) Init() error {
 	return nil
 }
 
-func (this *Follower) SetAlive(alive bool){
+func (this *Follower) SetAlive(alive bool) {
 	this.active.SetTo(alive)
 }
 
@@ -45,7 +46,7 @@ func (this *Follower) GetAlive() bool {
 	return this.active.IsSet()
 }
 
-func (this *Follower) GetRoleChan() chan RoleState {
+func (this *Follower) GetRoleChan() *chan RoleState {
 	return this.chan_role
 }
 
@@ -64,17 +65,19 @@ func (this *Follower) startTimeOutService() {
 		ot := time.Duration(rand.Intn(settings.TIMEOUT_MAX-settings.TIMEOUT_MIN) + settings.TIMEOUT_MIN)
 		select {
 		case <-this.chan_timeout:
-			//do nothing
+			break
+			//log.Printf("FOLLOWER(%d)：重置计时器...\n", this.CurrentTerm)
 		case <-time.After(ot * time.Millisecond):
 			if this.active.IsSet() {
 				log.Printf("FOLLOWER(%d)：Leader(%s)一直未响应，开始选举...\n", this.CurrentTerm, this.VotedFor)
 				rolestate := RoleState{settings.CANDIDATE, this.CurrentTerm}
-				this.chan_role <- rolestate
+				*this.chan_role <- rolestate
+			}else{
+				log.Printf("FOLLOWER(%d)：计时服务终止！！！\n", this.CurrentTerm)
+				return
 			}
-			break
 		}
 	}
-	log.Printf("FOLLOWER(%d)：计时服务终止！！！\n", this.CurrentTerm)
 }
 
 //日志应用服务(更新lastApplied)
@@ -162,11 +165,12 @@ func (this *Follower) HandleAppendLogReq(args0 LogAppArg, args1 *LogAckArg) erro
 		}
 		select {
 		case this.chan_timeout <- true:
-			//重置定时器
+			goto EndFor
 		case <-time.After(time.Millisecond * time.Duration(settings.CHANN_WAIT)):
-			continue
+			break	//跳出select
 		}
 	}
+	EndFor:
 
 	//收到了过期leader的log_rpc
 	if args0.Term > this.CurrentTerm {
@@ -221,16 +225,14 @@ func (this *Follower) handleHeartBeat(args0 LogAppArg, args1 *LogAckArg) error {
 		}
 
 		go func() {
-			for {
-				if !this.active.IsSet() {
-					return
-				}
-				select {
-				case this.chan_commits <- this.CommitIndex:
-					break
-				case <-time.After(time.Millisecond * time.Duration(settings.COMMIT_WAIT)):
-					continue
-				}
+			if !this.active.IsSet() {
+				return
+			}
+			select {
+			case this.chan_commits <- this.CommitIndex:
+				return
+			case <-time.After(time.Millisecond * time.Duration(settings.COMMIT_WAIT)):
+				return
 			}
 		}()
 	}

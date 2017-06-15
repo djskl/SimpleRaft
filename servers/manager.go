@@ -30,6 +30,8 @@ func (this *RaftManager) Init() {
 	this.br = &BaseRole{IP: this.CurrentIP}
 	this.br.Init()
 
+	log.Printf("MANAGER：%s启动...\n", this.CurrentIP)
+
 	this.rs = &Follower{BaseRole: this.br}
 	this.rs.Init()
 	this.rs.StartAllService()
@@ -43,27 +45,29 @@ func (this *RaftManager) StartRoleService() {
 		for {
 			select {
 			case <- this.role_stop:
+				log.Println("MANAGER：角色监听服务结束...")
 				this.role_over <- true
 				return
-			case role := <-role_chan:
-				go this.ConvertToRole(role)
+			case role := <- *role_chan:
+				this.ConvertToRole(role)
 			}
 		}
 	}()
 }
 
 func (this *RaftManager) RestartRoleService() {
-	role_chan := this.rs.GetRoleChan()
 	go func() {
 		this.role_stop <- true
 		<- this.role_over
-		log.Println("MANAGER：重启角色监听服务...")
+		log.Println("MANAGER：角色监听服务重启...")
+		role_chan := this.rs.GetRoleChan()
 		for {
 			select {
 			case <- this.role_stop:
+				log.Println("MANAGER：角色监听服务结束...")
 				this.role_over <- true
 				return
-			case role := <-role_chan:
+			case role := <- *role_chan:
 				this.ConvertToRole(role)
 			}
 		}
@@ -94,8 +98,8 @@ func (this *RaftManager) ConvertToRole(state RoleState) {
 		log.Fatalf("MANAGER：未知角色：%d\n", state.Role)
 	}
 	this.rs.Init()
-	this.rs.StartAllService()
 	this.RestartRoleService()
+	this.rs.StartAllService()
 }
 
 //Vote is used to respond to RequestVote RPC
@@ -128,6 +132,12 @@ func (this *RaftRPC) Vote(args0 VoteReqArg, args1 *VoteAckArg) error {
 
 //AppendLog is used to respond to AppendEntries RPC（with filled log）
 func (this *RaftRPC) AppendLog(args0 LogAppArg, args1 *LogAckArg) error {
+	err := this.RM.AppendLog(args0, args1)
+	return err
+}
+
+//HeartBeat is used to respond to HeartBeat RPC（without filled log）
+func (this *RaftRPC) HeartBeat(args0 LogAppArg, args1 *LogAckArg) error {
 	err := this.RM.AppendLog(args0, args1)
 	return err
 }
