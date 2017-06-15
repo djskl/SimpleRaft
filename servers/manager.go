@@ -116,7 +116,7 @@ func (this *RaftManager) AppendLog(args0 LogAppArg, args1 *LogAckArg) error {
 
 //Command is used to interact with users
 func (this *RaftManager) Command(cmds string, cmdAck *CommandAck) error {
-	err := this.rs.HandleCommandReq(cmds, &cmdAck.ok, &cmdAck.leaderIP)
+	err := this.rs.HandleCommandReq(cmds, &cmdAck.Ok, &cmdAck.LeaderIP)
 	return err
 }
 

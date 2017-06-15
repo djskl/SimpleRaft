@@ -87,7 +87,7 @@ func (this *Follower) startLogApplService() {
 		if !this.active.IsSet() {
 			break
 		}
-		for this.LastApplied < this.CommitIndex {
+		for this.LastApplied <= this.CommitIndex {
 			_log := this.Logs.Get(this.LastApplied + 1)
 			db.WriteToDisk(_log.Command)
 			this.LastApplied++
@@ -173,7 +173,7 @@ func (this *Follower) HandleAppendLogReq(args0 LogAppArg, args1 *LogAckArg) erro
 	EndFor:
 
 	//收到了过期leader的log_rpc
-	if args0.Term > this.CurrentTerm {
+	if args0.Term < this.CurrentTerm {
 		args1.Term = this.CurrentTerm
 		args1.Success = false
 		log.Printf("FOLLOWER(%d)：收到过期leader(%s)的append_log请求\n", this.CurrentTerm, args0.LeaderID)
@@ -186,7 +186,7 @@ func (this *Follower) HandleAppendLogReq(args0 LogAppArg, args1 *LogAckArg) erro
 
 	//来自leader的心跳信息(更新commit index)
 	if len(args0.Entries) == 0 {
-		log.Printf("FOLLOWER(%d)：收到leader(%s)的心跳信息\n", this.CurrentTerm, args0.LeaderID)
+		//log.Printf("FOLLOWER(%d)：收到leader(%s)的心跳信息\n", this.CurrentTerm, args0.LeaderID)
 		return this.handleHeartBeat(args0, args1)
 	}
 

@@ -52,6 +52,8 @@ func (this *Leader) Init() error {
 		this.NextIndex[ip] = log_length
 	}
 
+	this.chan_clients = make(map[int]chan int)
+
 	log.Printf("LEADER(%d)：初始化...\n", this.CurrentTerm)
 
 	return nil
@@ -198,8 +200,8 @@ func (this *Leader) startLogApplService() {
 			break
 		}
 
-		for this.LastApplied < this.CommitIndex {
-			_log := this.Logs.Get(this.LastApplied + 1)
+		for this.LastApplied <= this.CommitIndex {
+			_log := this.Logs.Get(this.LastApplied)
 			db.WriteToDisk(_log.Command)
 			this.LastApplied++
 			log.Printf("LEADER(%d): %d 已写到日志文件\n", this.CurrentTerm, this.LastApplied)
@@ -378,11 +380,18 @@ func (this *Leader) updateCommitIndex(logIndex int) {
 		return
 	}
 
-	if logIndex <= this.CommitIndex {
+	if logIndex < this.CommitIndex {
+		log.Printf("LEADER(%d)：无效日志记录!!!\n", this.CurrentTerm)
+		go func() {
+			this.chan_commits <- this.CommitIndex
+			for _, ch_client := range this.chan_clients {
+				ch_client <- this.CommitIndex
+			}
+		}()
 		return
 	}
 
-	for logIndex > this.CommitIndex {
+	for logIndex >= this.CommitIndex {
 		_log := this.Logs.Get(logIndex)
 
 		if _log.Term < this.CurrentTerm { //不能提交上一个term的日志

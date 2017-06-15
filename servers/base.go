@@ -64,6 +64,6 @@ type RoleState struct {
 }
 
 type CommandAck struct{
-	ok bool
-	leaderIP string
+	Ok bool
+	LeaderIP string
 }
