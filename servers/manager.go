@@ -10,48 +10,92 @@ type RaftManager struct {
 	br *BaseRole
 	rs RaftServer
 
-	chan_role chan RoleState //角色管道
-
 	AllServers []string
-	CurrentIP string
+	CurrentIP  string
+
+	role_stop chan bool
+	role_over chan bool
+
 }
 
 func (this *RaftManager) Init() {
+	this.role_stop = make(chan bool)
+	this.role_over = make(chan bool)
+
 	db.Init()
+
 	this.AllServers = db.LoadServerIPS(settings.IPFILE)
 	this.CurrentIP = this.AllServers[0]
+
 	this.br = &BaseRole{IP: this.CurrentIP}
 	this.br.Init()
-	this.chan_role = make(chan RoleState)
+
 	this.rs = &Follower{BaseRole: this.br}
-	this.rs.Init(this.chan_role)
+	this.rs.Init()
 	this.rs.StartAllService()
+	this.StartRoleService()
 }
 
-//通过管道chan_role监听角色变化事件
 func (this *RaftManager) StartRoleService() {
+	role_chan := this.rs.GetRoleChan()
 	go func() {
+		log.Println("MANAGER：启动角色监听服务...")
 		for {
-			role := <-this.chan_role
-			this.ConvertToRole(role)
+			select {
+			case <- this.role_stop:
+				this.role_over <- true
+				return
+			case role := <-role_chan:
+				go this.ConvertToRole(role)
+			}
+		}
+	}()
+}
+
+func (this *RaftManager) RestartRoleService() {
+	role_chan := this.rs.GetRoleChan()
+	go func() {
+		this.role_stop <- true
+		<- this.role_over
+		log.Println("MANAGER：重启角色监听服务...")
+		for {
+			select {
+			case <- this.role_stop:
+				this.role_over <- true
+				return
+			case role := <-role_chan:
+				this.ConvertToRole(role)
+			}
 		}
 	}()
 }
 
 func (this *RaftManager) ConvertToRole(state RoleState) {
-	this.br.SetAlive(false) //注销当前角色
+	this.rs.SetAlive(false) //注销当前角色
 	switch state.Role {
 	case settings.LEADER:
-		this.rs = &Leader{BaseRole: this.br, CurrentTerm: state.Term, AllServers: this.AllServers}
+		this.rs = &Leader{
+			BaseRole:    this.br,
+			CurrentTerm: state.Term,
+			AllServers:  this.AllServers,
+		}
 	case settings.CANDIDATE:
-		this.rs = &Candidate{BaseRole: this.br, CurrentTerm: state.Term, AllServers: this.AllServers}
+		this.rs = &Candidate{
+			BaseRole:    this.br,
+			CurrentTerm: state.Term,
+			AllServers:  this.AllServers,
+		}
 	case settings.FOLLOWER:
-		this.rs = &Follower{BaseRole: this.br, CurrentTerm: state.Term}
+		this.rs = &Follower{
+			BaseRole:    this.br,
+			CurrentTerm: state.Term,
+		}
 	default:
-		log.Fatalf("未知角色：%d\n", state.Role)
+		log.Fatalf("MANAGER：未知角色：%d\n", state.Role)
 	}
-	this.rs.Init(this.chan_role)
+	this.rs.Init()
 	this.rs.StartAllService()
+	this.RestartRoleService()
 }
 
 //Vote is used to respond to RequestVote RPC
@@ -93,8 +137,3 @@ func (this *RaftRPC) Command(cmds string, cmdAck *CommandAck) error {
 	err := this.RM.Command(cmds, cmdAck)
 	return err
 }
-
-
-
-
-

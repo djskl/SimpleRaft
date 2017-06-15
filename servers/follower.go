@@ -16,10 +16,15 @@ type Follower struct {
 	VotedFor    string
 	chan_commits chan int  //更新了commit后，激活这个管道
 	chan_timeout chan bool //定时管道
+
+	//角色是否处于激活状态，供角色启动的子协程参考
+	//用指针防止copy
+	active *utils.AtomicBool
+	chan_role chan RoleState //角色管道
 }
 
-func (this *Follower) Init(role_chan chan RoleState) error {
-	this.chan_role = role_chan
+func (this *Follower) Init() error {
+	this.chan_role = make(chan RoleState)
 
 	this.active = new(utils.AtomicBool)
 	this.active.Set()
@@ -30,6 +35,18 @@ func (this *Follower) Init(role_chan chan RoleState) error {
 	log.Printf("FOLLOWER(%d)：初始化...\n", this.CurrentTerm)
 
 	return nil
+}
+
+func (this *Follower) SetAlive(alive bool){
+	this.active.SetTo(alive)
+}
+
+func (this *Follower) GetAlive() bool {
+	return this.active.IsSet()
+}
+
+func (this *Follower) GetRoleChan() chan RoleState {
+	return this.chan_role
 }
 
 func (this *Follower) StartAllService() {

@@ -20,10 +20,15 @@ type Candidate struct {
 	total_votes  *int32
 
 	AllServers []string
+
+	//角色是否处于激活状态，供角色启动的子协程参考
+	//用指针防止copy
+	active *utils.AtomicBool
+	chan_role chan RoleState //角色管道
 }
 
-func (this *Candidate) Init(role_chan chan RoleState) error {
-	this.chan_role = role_chan
+func (this *Candidate) Init() error {
+	this.chan_role = make(chan RoleState)
 
 	this.VotedFor = ""
 
@@ -32,12 +37,25 @@ func (this *Candidate) Init(role_chan chan RoleState) error {
 
 	this.chan_timeout = make(chan bool)
 
+	this.CurrentTerm += 1
 	this.total_votes = new(int32)
 	atomic.AddInt32(this.total_votes, 1) //先投自己一票
 
 	log.Printf("CANDIDATE(%d)：初始化...\n", this.CurrentTerm)
 
 	return nil
+}
+
+func (this *Candidate) SetAlive(alive bool){
+	this.active.SetTo(alive)
+}
+
+func (this *Candidate) GetAlive() bool {
+	return this.active.IsSet()
+}
+
+func (this *Candidate) GetRoleChan() chan RoleState {
+	return this.chan_role
 }
 
 func (this *Candidate) StartAllService() {
@@ -47,8 +65,6 @@ func (this *Candidate) StartAllService() {
 func (this *Candidate) startVoteService() {
 
 	log.Printf("CANDIDATE(%d)：启动投票服务...\n", this.CurrentTerm)
-
-	this.CurrentTerm += 1
 
 	lastLogIndex := this.Logs.Size() - 1
 	lastLog := this.Logs.Get(lastLogIndex)
@@ -63,7 +79,7 @@ func (this *Candidate) startVoteService() {
 
 	ot := time.Duration(rand.Intn(settings.TIMEOUT_MAX-settings.TIMEOUT_MIN) + settings.TIMEOUT_MIN)
 
-	<-time.After(ot)
+	<-time.After(ot*time.Millisecond)
 
 	if !this.active.IsSet() {
 		return
@@ -96,7 +112,8 @@ func (this *Candidate) requestVote(ip string, logIdx int, logTerm int) {
 		}
 		client, err = rpc.DialHTTP("tcp", ip+":"+settings.SERVERPORT)
 		if err != nil {
-			//log.Printf("CANDIDATE(%d)：无法与%s建立连接！！！\n", this.CurrentTerm, ip)
+			log.Printf("CANDIDATE(%d)：无法与%s建立连接！！！\n", this.CurrentTerm, ip)
+			time.Sleep(time.Second*time.Duration(settings.RPC_WAIT))
 			continue
 		}
 		break
@@ -109,7 +126,8 @@ func (this *Candidate) requestVote(ip string, logIdx int, logTerm int) {
 		}
 		err = client.Call("RaftManager.Vote", voteReq, voteAck)
 		if err != nil {
-			//log.Printf("CANDIDATE(%d)：调用%s的Vote方法失败！！！\n", this.CurrentTerm, ip)
+			log.Printf("CANDIDATE(%d)：调用%s的Vote方法失败！！！\n", this.CurrentTerm, ip)
+			time.Sleep(time.Second*time.Duration(settings.RPC_WAIT))
 			continue
 		}
 		break

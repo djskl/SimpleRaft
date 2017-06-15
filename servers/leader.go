@@ -24,11 +24,16 @@ type Leader struct {
 
 	chan_clients map[int]chan int //leader确定提交了某项日志后，激活这一组管道
 	chan_newlog  chan int         //当有新日志到来时激活日志复制服务
-	chan_commits chan int         //更新了commit后，激活这个管道	
+	chan_commits chan int         //更新了commit后，激活这个管道
+
+	//角色是否处于激活状态，供角色启动的子协程参考
+	//用指针防止copy
+	active *utils.AtomicBool
+	chan_role chan RoleState
 }
 
-func (this *Leader) Init(role_chan chan RoleState) error {
-	this.chan_role = role_chan
+func (this *Leader) Init() error {
+	this.chan_role = make(chan RoleState)
 
 	this.VotedFor = this.IP
 
@@ -49,6 +54,18 @@ func (this *Leader) Init(role_chan chan RoleState) error {
 	log.Printf("LEADER(%d)：初始化...\n", this.CurrentTerm)
 
 	return nil
+}
+
+func (this *Leader) SetAlive(alive bool){
+	this.active.SetTo(alive)
+}
+
+func (this *Leader) GetAlive() bool {
+	return this.active.IsSet()
+}
+
+func (this *Leader) GetRoleChan() chan RoleState {
+	return this.chan_role
 }
 
 //启动所有服务
@@ -214,6 +231,7 @@ func (this *Leader) startHeartbeatService() {
 					client, err = rpc.DialHTTP("tcp", ip+":"+settings.SERVERPORT)
 					if err != nil {
 						log.Printf("LEADER(%d)：无法与Follower(%s)建立连接！！！\n", this.CurrentTerm, ip)
+						time.Sleep(time.Second*time.Duration(settings.RPC_WAIT))
 						continue
 					}
 					break
@@ -228,6 +246,7 @@ func (this *Leader) startHeartbeatService() {
 					err = client.Call("RaftManager.HeartBeat", hbReq, hbAck)
 					if err != nil {
 						log.Printf("LEADER(%d)：调用Follower(%s)的HeartBeat方法失败！！！\n", this.CurrentTerm, ip)
+						time.Sleep(time.Second*time.Duration(settings.RPC_WAIT))
 						continue
 					}
 					break
