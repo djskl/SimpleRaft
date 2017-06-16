@@ -210,9 +210,9 @@ func (this *Candidate) HandleVoteReq(args0 VoteReqArg, args1 *VoteAckArg) error 
 }
 
 //处于Candidate状态的机器暂时不可用
-func (this *Candidate) HandleCommandReq(cmds string, ok *bool, leaderIP *string) error {
-	*leaderIP = ""
-	*ok = false
+func (this *Candidate) HandleCommandReq(cmds string, cmdAck *CommandAck) error {
+	cmdAck.Ok = false
+	cmdAck.LeaderIP = this.VotedFor
 	return nil
 }
 

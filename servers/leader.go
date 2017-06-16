@@ -22,7 +22,7 @@ type Leader struct {
 	NextIndex  map[string]int
 	MatchIndex map[string]int
 
-	chan_clients map[int]chan int //leader确定提交了某项日志后，激活这一组管道
+	Chan_clients map[int]chan int //leader确定提交了某项日志后，激活这一组管道
 	chan_newlog  chan int         //当有新日志到来时激活日志复制服务
 	chan_commits chan int         //更新了commit后，激活这个管道
 
@@ -52,8 +52,6 @@ func (this *Leader) Init() error {
 		this.NextIndex[ip] = log_length
 	}
 
-	this.chan_clients = make(map[int]chan int)
-
 	log.Printf("LEADER(%d)：初始化...\n", this.CurrentTerm)
 
 	return nil
@@ -78,7 +76,7 @@ func (this *Leader) StartAllService() {
 	go this.startLogApplService()
 }
 
-func (this *Leader) HandleCommandReq(cmd string, ok *bool, leaderIP *string) error {
+func (this *Leader) HandleCommandReq(cmd string, cmdAck *CommandAck) error {
 	if !this.active.IsSet() {
 		return nil
 	}
@@ -91,25 +89,26 @@ func (this *Leader) HandleCommandReq(cmd string, ok *bool, leaderIP *string) err
 	this.chan_newlog <- pos
 
 	chan_client := make(chan int)
-	this.chan_clients[pos] = chan_client
+	this.Chan_clients[pos] = chan_client
 	for {
 		if !this.active.IsSet() {
-			*ok = false
-			*leaderIP = this.VotedFor
+			cmdAck.Ok = false
+			cmdAck.LeaderIP = this.VotedFor
 			break
 		}
 
 		select {
 		case commitIdx := <-chan_client:
 			if commitIdx >= pos {
-				*ok = true
-				*leaderIP = this.IP
-				delete(this.chan_clients, pos)
+				cmdAck.Ok = true
+				cmdAck.LeaderIP = this.VotedFor
+				cmdAck.Cmd = this.Logs.Get(pos).Command
+				delete(this.Chan_clients, pos)
 				log.Printf("LEADER(%d)：成功处理：%s\n", this.CurrentTerm, cmd)
 				return nil
 			}
 		case <-time.After(time.Millisecond * time.Duration(settings.CLIENT_WAIT)):
-			break	//不会跳出for循环
+			break	//跳出select循环，但不会跳出for循环
 		}
 
 	}
@@ -384,7 +383,7 @@ func (this *Leader) updateCommitIndex(logIndex int) {
 		log.Printf("LEADER(%d)：无效日志记录!!!\n", this.CurrentTerm)
 		go func() {
 			this.chan_commits <- this.CommitIndex
-			for _, ch_client := range this.chan_clients {
+			for _, ch_client := range this.Chan_clients {
 				ch_client <- this.CommitIndex
 			}
 		}()
@@ -406,7 +405,7 @@ func (this *Leader) updateCommitIndex(logIndex int) {
 					log.Printf("LEADER(%d)：日志复制成功，当前commitIndex=%d\n", this.CurrentTerm, this.CommitIndex)
 					go func() {
 						this.chan_commits <- this.CommitIndex
-						for _, ch_client := range this.chan_clients {
+						for _, ch_client := range this.Chan_clients {
 							ch_client <- this.CommitIndex
 						}
 					}()

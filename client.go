@@ -11,6 +11,7 @@ var LEADER_IP string = ""
 
 type CommandAck struct {
 	Ok       bool
+	Cmd      string
 	LeaderIP string
 }
 
@@ -58,7 +59,7 @@ func Submit(cmd string) {
 			log.Printf("LEADER_IP是：%s，重新提交...\n", ack.LeaderIP)
 			LEADER_IP = ack.LeaderIP
 			Submit(cmd)
-		}else{
+		} else {
 			log.Printf("命令：%s提交失败!!!\n", cmd)
 		}
 	}

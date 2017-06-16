@@ -16,6 +16,7 @@ type RaftManager struct {
 	role_stop chan bool
 	role_over chan bool
 
+	chan_clients map[int]chan int //leader确定提交了某项日志后，激活这一组管道
 }
 
 func (this *RaftManager) Init() {
@@ -29,6 +30,8 @@ func (this *RaftManager) Init() {
 
 	this.br = &BaseRole{IP: this.CurrentIP}
 	this.br.Init()
+
+	this.chan_clients = make(map[int]chan int)
 
 	log.Printf("MANAGER：%s启动...\n", this.CurrentIP)
 
@@ -82,6 +85,7 @@ func (this *RaftManager) ConvertToRole(state RoleState) {
 			BaseRole:    this.br,
 			CurrentTerm: state.Term,
 			AllServers:  this.AllServers,
+			Chan_clients: this.chan_clients,
 		}
 	case settings.CANDIDATE:
 		this.rs = &Candidate{
@@ -115,8 +119,8 @@ func (this *RaftManager) AppendLog(args0 LogAppArg, args1 *LogAckArg) error {
 }
 
 //Command is used to interact with users
-func (this *RaftManager) Command(cmds string, cmdAck *CommandAck) error {
-	err := this.rs.HandleCommandReq(cmds, &cmdAck.Ok, &cmdAck.LeaderIP)
+func (this *RaftManager) Command(cmd string, cmdAck *CommandAck) error {
+	err := this.rs.HandleCommandReq(cmd, cmdAck)
 	return err
 }
 

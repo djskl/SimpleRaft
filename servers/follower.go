@@ -239,8 +239,8 @@ func (this *Follower) handleHeartBeat(args0 LogAppArg, args1 *LogAckArg) error {
 	return nil
 }
 
-func (this *Follower) HandleCommandReq(cmd string, ok *bool, leaderIP *string) error {
-	*ok = false
-	*leaderIP = this.VotedFor
+func (this *Follower) HandleCommandReq(cmd string, cmdAck *CommandAck) error {
+	cmdAck.Ok = false
+	cmdAck.LeaderIP = this.VotedFor
 	return nil
 }

@@ -5,11 +5,11 @@ import (
 )
 
 type RaftServer interface {
-	Init() error                                  //初始化操作										//改变角色的存活状态
+	Init() error                                                    //初始化操作										//改变角色的存活状态
 	StartAllService()                                               //启动当前角色下的所有服务
 	HandleVoteReq(args0 VoteReqArg, args1 *VoteAckArg) error        //处理RequestVote RPC
 	HandleAppendLogReq(args0 LogAppArg, args1 *LogAckArg) error     //处理AppendEntries RPC
-	HandleCommandReq(cmds string, ok *bool, leaderIP *string) error //处理用户(client)请求
+	HandleCommandReq(cmds string, cmdAck *CommandAck) error //处理用户(client)请求
 
 	GetAlive() bool
 	SetAlive(alive bool)
@@ -63,7 +63,8 @@ type RoleState struct {
 	Term int
 }
 
-type CommandAck struct{
-	Ok bool
+type CommandAck struct {
+	Ok       bool
+	Cmd      string
 	LeaderIP string
 }
