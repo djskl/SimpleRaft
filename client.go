@@ -53,7 +53,11 @@ func Submit(cmd string) {
 	client.Close()
 
 	if ack.Ok {
-		log.Printf("命令：%s提交成功!!!\n", cmd)
+		if ack.Cmd == cmd {
+			log.Printf("命令：%s提交成功!!!\n", cmd)
+		} else {
+			log.Printf("命令：%s被覆盖(%s)!!!\n", cmd, ack.Cmd)
+		}
 	} else {
 		if ack.LeaderIP != "" {
 			log.Printf("LEADER_IP是：%s，重新提交...\n", ack.LeaderIP)
