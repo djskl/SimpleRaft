@@ -175,12 +175,6 @@ func (this *RaftRPC) AppendLog(args0 LogAppArg, args1 *LogAckArg) error {
 	return err
 }
 
-//HeartBeat is used to respond to HeartBeat RPC（without filled log）
-func (this *RaftRPC) HeartBeat(args0 LogAppArg, args1 *LogAckArg) error {
-	err := this.RM.AppendLog(args0, args1)
-	return err
-}
-
 //Command is used to interact with users
 func (this *RaftRPC) Command(cmds string, cmdAck *CommandAck) error {
 	err := this.RM.Command(cmds, cmdAck)

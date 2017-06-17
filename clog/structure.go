@@ -21,14 +21,16 @@ func (this *Manager) Add(log LogItem) int {
 	this.lock.Lock()
 	defer this.lock.Unlock()
 	this.logs = append(this.logs, log)
-	return len(this.logs) - 1
+	return len(this.logs)
 }
 
 func (this *Manager) Extend(otherLogs []LogItem) int {
 	this.lock.Lock()
 	defer this.lock.Unlock()
-	this.logs = append(this.logs, otherLogs...)
-	return len(this.logs) - 1
+	if otherLogs != nil && len(otherLogs) > 0{
+		this.logs = append(this.logs, otherLogs...)
+	}
+	return len(this.logs)
 }
 
 func (this *Manager) Size() int {
@@ -39,18 +41,21 @@ func (this *Manager) Size() int {
 
 func (this *Manager) Get(idx int) LogItem {
 	size := this.Size()
-	if size == 0 || idx >= size {
+	if idx < 1 || size == 0 || idx > size {
 		return LogItem{}
 	}
 	this.lock.RLock()
 	defer this.lock.RUnlock()
-	return this.logs[idx]
+	return this.logs[idx-1]
 }
 
 func (this *Manager) GetFrom(idx int) []LogItem {
 	this.lock.RLock()
 	defer this.lock.RUnlock()
-	return this.logs[idx:]
+	if idx < 1 {
+		return nil
+	}
+	return this.logs[idx-1:]
 }
 
 func (this *Manager) RemoveFrom(idx int) {

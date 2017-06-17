@@ -50,7 +50,7 @@ func (this *Leader) Init() error {
 
 	log_length := this.Logs.Size()
 	for _, ip := range this.AllServers {
-		this.NextIndex[ip] = log_length
+		this.NextIndex[ip] = log_length + 1
 	}
 
 	log.Printf("LEADER(%d)：初始化...\n", this.CurrentTerm)
@@ -157,7 +157,6 @@ func (this *Leader) HandleAppendLogReq(args0 LogAppArg, args1 *LogAckArg) error 
 			return nil
 		}
 	}
-
 	return nil
 }
 
@@ -221,8 +220,6 @@ func (this *Leader) replicateLog(ip string, next_index int) {
 		return
 	}
 
-	log.Printf("LEADER(%d)：向%s复制日志:%d...\n", this.CurrentTerm, ip, next_index)
-
 	var preidx, pretem int
 
 	if next_index == 1 { //此时复制第一个日志
@@ -234,6 +231,11 @@ func (this *Leader) replicateLog(ip string, next_index int) {
 	}
 
 	toSendEntries := this.Logs.GetFrom(next_index)
+	if toSendEntries != nil && len(toSendEntries) > 0 {
+		log.Printf("LEADER(%d)：向%s复制日志:%d...\n", this.CurrentTerm, ip, next_index)
+	} else {
+		log.Printf("LEADER(%d)：向%s发送心跳信息...\n", this.CurrentTerm, ip)
+	}
 
 	logReq := LogAppArg{
 		Term:            this.CurrentTerm,
@@ -303,6 +305,11 @@ func (this *Leader) handleLogAck(ip string, next_index int, logAck *LogAckArg) {
 		return
 	}
 
+	if next_index == logAck.LastLogIndex + 1 {
+		log.Printf("LEADER(%d)：收到Follower(%s)的心跳响应！！！\n", this.CurrentTerm, ip)
+		return
+	}
+
 	this.NextIndex[ip] = logAck.LastLogIndex + 1
 	this.MatchIndex[ip] = logAck.LastLogIndex
 
@@ -313,13 +320,13 @@ func (this *Leader) handleLogAck(ip string, next_index int, logAck *LogAckArg) {
 // If there exists an N such that N > commitIndex,
 // a majority of matchIndex[i] ≥ N and log[N].term == currentTerm:
 // set commitIndex = N
-func (this *Leader) updateCommitIndex(logIndex int) {
+func (this *Leader) updateCommitIndex(newLogIndex int) {
 	if !this.active.IsSet() {
 		return
 	}
 
-	if logIndex <= this.CommitIndex {
-		log.Printf("LEADER(%d)：日志(%d)已提交!!!\n", this.CurrentTerm, logIndex)
+	if newLogIndex <= this.CommitIndex {
+		log.Printf("LEADER(%d)：日志(%d)已提交!!!\n", this.CurrentTerm, newLogIndex)
 		go func() {
 			this.chan_commits <- this.CommitIndex
 			this.Clients.NotifyAll(this.CommitIndex)
@@ -330,16 +337,16 @@ func (this *Leader) updateCommitIndex(logIndex int) {
 		return
 	}
 
-	for logIndex >= this.CommitIndex {
-		_log := this.Logs.Get(logIndex)
+	for newLogIndex > this.CommitIndex {
+		_log := this.Logs.Get(newLogIndex)
 
 		if _log.Term < this.CurrentTerm { //不能提交上一个term的日志
-			return
+			continue
 		}
 
-		nums := 0
+		nums := 1
 		for _, match_idx := range this.MatchIndex {
-			if match_idx >= logIndex {
+			if match_idx >= newLogIndex {
 				if nums++; nums >= settings.MAJORITY {
 					this.CommitIndex = match_idx
 					log.Printf("LEADER(%d)：日志复制成功，当前commitIndex=%d\n", this.CurrentTerm, this.CommitIndex)
@@ -354,6 +361,6 @@ func (this *Leader) updateCommitIndex(logIndex int) {
 				}
 			}
 		}
-		logIndex--
+		newLogIndex--
 	}
 }

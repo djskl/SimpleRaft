@@ -11,9 +11,11 @@ import (
 
 type Follower struct {
 	*BaseRole
+
 	//persistent state
-	CurrentTerm  int
-	VotedFor     string
+	CurrentTerm int
+	VotedFor    string
+
 	chan_commits chan int  //更新了commit后，激活这个管道
 	chan_timeout chan bool //定时管道
 
@@ -65,14 +67,14 @@ func (this *Follower) startTimeOutService() {
 		ot := time.Duration(rand.Intn(settings.TIMEOUT_MAX-settings.TIMEOUT_MIN) + settings.TIMEOUT_MIN)
 		select {
 		case <-this.chan_timeout:
-			break
 			//log.Printf("FOLLOWER(%d)：重置计时器...\n", this.CurrentTerm)
+			break
 		case <-time.After(ot * time.Millisecond):
 			if this.active.IsSet() {
 				log.Printf("FOLLOWER(%d)：Leader(%s)一直未响应，开始选举...\n", this.CurrentTerm, this.VotedFor)
 				rolestate := RoleState{settings.CANDIDATE, this.CurrentTerm}
 				*this.chan_role <- rolestate
-			}else{
+			} else {
 				log.Printf("FOLLOWER(%d)：计时服务终止！！！\n", this.CurrentTerm)
 				return
 			}
@@ -87,11 +89,13 @@ func (this *Follower) startLogApplService() {
 		if !this.active.IsSet() {
 			break
 		}
-		for this.LastApplied <= this.CommitIndex {
-			_log := this.Logs.Get(this.LastApplied + 1)
-			db.WriteToDisk(_log.Command)
+		for this.LastApplied < this.CommitIndex {
 			this.LastApplied++
-			log.Printf("FOLLOWER(%d): %d 已写到日志文件\n", this.CurrentTerm, this.LastApplied)
+			_log := this.Logs.Get(this.LastApplied)
+			if _log.Command != "" {
+				db.WriteToDisk(_log.Command)
+				log.Printf("FOLLOWER(%d): %d 已写到日志文件\n", this.CurrentTerm, this.LastApplied)
+			}
 		}
 
 		select {
@@ -123,17 +127,17 @@ func (this *Follower) HandleVoteReq(args0 VoteReqArg, args1 *VoteAckArg) error {
 
 	voteGranted := false
 	if this.VotedFor == args0.CandidateID || this.VotedFor == "" { //比较谁包含的日志记录更新更长
-		log_length := this.Logs.Size()
-		last_log := this.Logs.Get(log_length - 1)
+		lastLogIndex := this.Logs.Size()
+		lastLog := this.Logs.Get(lastLogIndex)
 
-		t := last_log.Term - args0.LastLogTerm
+		t := lastLog.Term - args0.LastLogTerm
 		switch {
 		case t < 0:
 			voteGranted = true
 		case t > 0:
 			voteGranted = false
 		case t == 0:
-			if log_length > args0.LastLogIndex+1 {
+			if lastLogIndex > args0.LastLogIndex {
 				voteGranted = false
 			} else {
 				voteGranted = true
@@ -167,7 +171,7 @@ func (this *Follower) HandleAppendLogReq(args0 LogAppArg, args1 *LogAckArg) erro
 		case this.chan_timeout <- true:
 			goto EndFor
 		case <-time.After(time.Millisecond * time.Duration(settings.CHANN_WAIT)):
-			break	//跳出select
+			break //跳出select
 		}
 	}
 	EndFor:
@@ -185,43 +189,42 @@ func (this *Follower) HandleAppendLogReq(args0 LogAppArg, args1 *LogAckArg) erro
 	this.CurrentTerm = args0.Term
 
 	//来自leader的心跳信息(更新commit index)
-	if len(args0.Entries) == 0 {
-		//log.Printf("FOLLOWER(%d)：收到leader(%s)的心跳信息\n", this.CurrentTerm, args0.LeaderID)
-		return this.handleHeartBeat(args0, args1)
-	}
-
-	args1.Term = this.CurrentTerm
-	var lastLogIdx int = -1
-	if args0.PreLogIndex > -1 {
-		preLog := this.Logs.Get(args0.PreLogIndex)
-		if preLog.Term != args0.PreLogTerm {
-			log.Printf("FOLLOWER(%d)：与leader(%s)的日志信息不一致\n", this.CurrentTerm, args0.LeaderID)
-			this.Logs.RemoveFrom(args0.PreLogIndex)
-			args1.Success = false
-			return nil
+	if args0.Entries == nil || len(args0.Entries) == 0 {
+		this.handleHeartBeat(args0)
+		log.Printf("FOLLOWER(%d)：收到leader(%s)的心跳信息\n", this.CurrentTerm, args0.LeaderID)
+	} else {
+		if args0.PreLogIndex > 0 {
+			preLog := this.Logs.Get(args0.PreLogIndex)
+			if preLog.Term != args0.PreLogTerm {
+				log.Printf("FOLLOWER(%d)：与leader(%s)的日志信息不一致\n", this.CurrentTerm, args0.LeaderID)
+				this.Logs.RemoveFrom(args0.PreLogIndex)
+				args1.Success = false
+				return nil
+			}
 		}
+		log.Printf("FOLLOWER(%d)：收到leader(%s)的新日志记录(PreTerm: %d, PreIndex: %d, Size: %d)\n",
+			this.CurrentTerm, args0.LeaderID, args0.PreLogTerm, args0.PreLogIndex, len(args0.Entries))
 	}
-	lastLogIdx = this.Logs.Extend(args0.Entries)
-	args1.LastLogIndex = lastLogIdx
-	args1.Success = true
 
-	log.Printf("FOLLOWER(%d)：收到leader(%s)的新日志记录(PreTerm: %d, PreIndex: %d, Size: %d)\n",
-		this.CurrentTerm, args0.LeaderID, args0.PreLogTerm, args0.PreLogIndex, len(args0.Entries))
+	lastLogIdx := this.Logs.Extend(args0.Entries)
+	args1.LastLogIndex = lastLogIdx
+	args1.Term = this.CurrentTerm
+	args1.Success = true
 
 	return nil
 }
 
-func (this *Follower) handleHeartBeat(args0 LogAppArg, args1 *LogAckArg) error {
+func (this *Follower) handleHeartBeat(args0 LogAppArg) error {
 	if !this.active.IsSet() {
 		return nil
 	}
 
 	if args0.LeaderCommitIdx > this.CommitIndex {
 		log_size := this.Logs.Size()
-		if args0.LeaderCommitIdx < log_size {
-			this.CommitIndex = args0.LeaderCommitIdx
-		} else {
+		if args0.LeaderCommitIdx > log_size {
 			this.CommitIndex = log_size
+		} else {
+			this.CommitIndex = args0.LeaderCommitIdx
 		}
 
 		go func() {

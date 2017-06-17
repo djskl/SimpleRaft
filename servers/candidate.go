@@ -67,7 +67,7 @@ func (this *Candidate) startVoteService() {
 
 	log.Printf("CANDIDATE(%d)：启动投票服务...\n", this.CurrentTerm)
 
-	lastLogIndex := this.Logs.Size() - 1
+	lastLogIndex := this.Logs.Size()
 	lastLog := this.Logs.Get(lastLogIndex)
 	lastLogTerm := lastLog.Term
 	for idx := 0; idx < len(this.AllServers); idx++ {

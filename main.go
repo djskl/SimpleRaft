@@ -25,10 +25,5 @@ func StartService() {
 }
 
 func main() {
-	dct := map[int]int{
-		2:3,
-	}
-
-	delete(dct, 5)
-
+	StartService()
 }
