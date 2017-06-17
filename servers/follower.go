@@ -191,7 +191,7 @@ func (this *Follower) HandleAppendLogReq(args0 LogAppArg, args1 *LogAckArg) erro
 	//来自leader的心跳信息(更新commit index)
 	if args0.Entries == nil || len(args0.Entries) == 0 {
 		this.handleHeartBeat(args0)
-		log.Printf("FOLLOWER(%d)：收到leader(%s)的心跳信息\n", this.CurrentTerm, args0.LeaderID)
+		//log.Printf("FOLLOWER(%d)：收到leader(%s)的心跳信息\n", this.CurrentTerm, args0.LeaderID)
 	} else {
 		if args0.PreLogIndex > 0 {
 			preLog := this.Logs.Get(args0.PreLogIndex)

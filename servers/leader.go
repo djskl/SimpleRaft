@@ -196,10 +196,12 @@ func (this *Leader) startLogApplService() {
 		}
 
 		for this.LastApplied <= this.CommitIndex {
-			_log := this.Logs.Get(this.LastApplied)
-			db.WriteToDisk(_log.Command)
 			this.LastApplied++
-			log.Printf("LEADER(%d): %d 已写到日志文件\n", this.CurrentTerm, this.LastApplied)
+			_log := this.Logs.Get(this.LastApplied)
+			if _log.Command != "" {
+				db.WriteToDisk(_log.Command)
+				log.Printf("FOLLOWER(%d): %d 已写到日志文件\n", this.CurrentTerm, this.LastApplied)
+			}
 		}
 		select {
 		case <-this.chan_commits:
@@ -234,7 +236,7 @@ func (this *Leader) replicateLog(ip string, next_index int) {
 	if toSendEntries != nil && len(toSendEntries) > 0 {
 		log.Printf("LEADER(%d)：向%s复制日志:%d...\n", this.CurrentTerm, ip, next_index)
 	} else {
-		log.Printf("LEADER(%d)：向%s发送心跳信息...\n", this.CurrentTerm, ip)
+		//log.Printf("LEADER(%d)：向%s发送心跳信息...\n", this.CurrentTerm, ip)
 	}
 
 	logReq := LogAppArg{
@@ -306,7 +308,7 @@ func (this *Leader) handleLogAck(ip string, next_index int, logAck *LogAckArg) {
 	}
 
 	if next_index == logAck.LastLogIndex + 1 {
-		log.Printf("LEADER(%d)：收到Follower(%s)的心跳响应！！！\n", this.CurrentTerm, ip)
+		//log.Printf("LEADER(%d)：收到Follower(%s)的心跳响应！！！\n", this.CurrentTerm, ip)
 		return
 	}
 
@@ -325,17 +327,14 @@ func (this *Leader) updateCommitIndex(newLogIndex int) {
 		return
 	}
 
-	if newLogIndex <= this.CommitIndex {
-		log.Printf("LEADER(%d)：日志(%d)已提交!!!\n", this.CurrentTerm, newLogIndex)
-		go func() {
-			this.chan_commits <- this.CommitIndex
-			this.Clients.NotifyAll(this.CommitIndex)
-			//for _, ch_client := range this.Chan_clients {
-			//	ch_client <- this.CommitIndex
-			//}
-		}()
-		return
-	}
+	//if newLogIndex <= this.CommitIndex {
+	//	log.Printf("LEADER(%d)：日志(%d)已提交!!!\n", this.CurrentTerm, newLogIndex)
+	//	go func() {
+	//		this.chan_commits <- this.CommitIndex
+	//		this.Clients.NotifyAll(this.CommitIndex)
+	//	}()
+	//	return
+	//}
 
 	for newLogIndex > this.CommitIndex {
 		_log := this.Logs.Get(newLogIndex)
@@ -353,9 +352,6 @@ func (this *Leader) updateCommitIndex(newLogIndex int) {
 					go func() {
 						this.chan_commits <- this.CommitIndex
 						this.Clients.NotifyAll(this.CommitIndex)
-						//for _, ch_client := range this.Chan_clients {
-						//	ch_client <- this.CommitIndex
-						//}
 					}()
 					return
 				}
