@@ -24,10 +24,11 @@ func StartService() {
 	http.Serve(l, nil)
 }
 
-func f(dct map[string]string)  {
-	dct["hello"] = "CES"
-}
-
 func main() {
+	dct := map[int]int{
+		2:3,
+	}
+
+	delete(dct, 5)
 
 }

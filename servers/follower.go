@@ -97,7 +97,7 @@ func (this *Follower) startLogApplService() {
 		select {
 		case <-this.chan_commits:
 			//do nothing
-		case <-time.After(time.Millisecond * time.Duration(settings.NEWLOG_WAIT)):
+		case <-time.After(time.Millisecond * time.Duration(settings.HEART_BEATS)):
 			//do nothing
 		}
 	}

@@ -2,10 +2,9 @@ package settings
 
 const TIMEOUT_MIN = 1000 	//1s
 const TIMEOUT_MAX = 2000	//2s
-const HEART_BEATS = 500 	//100ms
+const HEART_BEATS = 1000 	//1s
+const COMMIT_WAIT = 1000	//1s
 const CLIENT_WAIT = 150		//150ms
-const COMMIT_WAIT = 300		//300ms
-const NEWLOG_WAIT = 1000	//1000ms
 
 const CHANN_WAIT = 1000		//1s
 

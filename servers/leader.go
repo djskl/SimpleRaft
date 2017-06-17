@@ -22,7 +22,8 @@ type Leader struct {
 	NextIndex  map[string]int
 	MatchIndex map[string]int
 
-	Chan_clients map[int]chan int //leader确定提交了某项日志后，激活这一组管道
+	Clients *ClientWaitGroup
+
 	chan_newlog  chan int         //当有新日志到来时激活日志复制服务
 	chan_commits chan int         //更新了commit后，激活这个管道
 
@@ -72,7 +73,6 @@ func (this *Leader) GetRoleChan() *chan RoleState {
 //启动所有服务
 func (this *Leader) StartAllService() {
 	go this.startLogReplService()
-	go this.startHeartbeatService()
 	go this.startLogApplService()
 }
 
@@ -84,12 +84,13 @@ func (this *Leader) HandleCommandReq(cmd string, cmdAck *CommandAck) error {
 	log.Printf("LEADER(%d)：收到客户端请求：%s\n", this.CurrentTerm, cmd)
 
 	_log := clog.LogItem{this.CurrentTerm, cmd}
-	pos := this.Logs.Add(_log)
+
+	pos := this.Logs.Add(_log)	//pos从1开始计数，第一个日志的pos为1
 
 	this.chan_newlog <- pos
 
 	chan_client := make(chan int)
-	this.Chan_clients[pos] = chan_client
+	this.Clients.Add(pos, chan_client)
 	for {
 		if !this.active.IsSet() {
 			cmdAck.Ok = false
@@ -103,7 +104,7 @@ func (this *Leader) HandleCommandReq(cmd string, cmdAck *CommandAck) error {
 				cmdAck.Ok = true
 				cmdAck.LeaderIP = this.VotedFor
 				cmdAck.Cmd = this.Logs.Get(pos).Command
-				delete(this.Chan_clients, pos)
+				this.Clients.Remove(pos)
 				log.Printf("LEADER(%d)：成功处理：%s\n", this.CurrentTerm, cmd)
 				return nil
 			}
@@ -160,7 +161,7 @@ func (this *Leader) HandleAppendLogReq(args0 LogAppArg, args1 *LogAckArg) error 
 	return nil
 }
 
-//日志replicate服务
+//日志replicate服务：有日志传日志，没日志传心跳
 func (this *Leader) startLogReplService() {
 	log.Printf("LEADER(%d)：启动replicate_log服务...\n", this.CurrentTerm)
 	for {
@@ -168,23 +169,19 @@ func (this *Leader) startLogReplService() {
 			break
 		}
 
-		log_length := this.Logs.Size()
 		for idx := 0; idx < len(this.AllServers); idx++ {
 			ip := this.AllServers[idx]
 			if ip == this.IP {
 				continue
 			}
 			next_index := this.NextIndex[ip]
-			if next_index >= log_length {
-				continue
-			}
 			go this.replicateLog(ip, next_index)
 		}
 
 		select {
 		case <-this.chan_newlog:
 			//do nothing
-		case <-time.After(time.Millisecond*time.Duration(settings.NEWLOG_WAIT)):
+		case <-time.After(time.Millisecond*time.Duration(settings.HEART_BEATS)):
 			//do nothing
 		}
 	}
@@ -208,68 +205,11 @@ func (this *Leader) startLogApplService() {
 		select {
 		case <-this.chan_commits:
 			//do nothing
-		case <-time.After(time.Millisecond*time.Duration(settings.NEWLOG_WAIT)):
+		case <-time.After(time.Millisecond*time.Duration(settings.COMMIT_WAIT)):
 			//do nothing
 		}
 	}
 	log.Printf("LEADER(%d)：日志应用服务终止！！！\n", this.CurrentTerm)
-}
-
-//定时向Follower(candidate)发送心跳检测信息，
-//告诉它们Leader依然在线
-func (this *Leader) startHeartbeatService() {
-	log.Printf("LEADER(%d)：启动心跳检测服务...\n", this.CurrentTerm)
-
-	hbReq := LogAppArg{
-		Term:            this.CurrentTerm,
-		LeaderID:        this.IP,
-		LeaderCommitIdx: this.CommitIndex,
-	}
-	for {
-		if !this.active.IsSet() {
-			break
-		}
-		nums := len(this.AllServers)
-		for idx := 0; idx < nums; idx++ {
-			ip := this.AllServers[idx]
-			if ip == this.IP {
-				continue
-			}
-			go func(ip string, hbReq LogAppArg) {
-				if !this.active.IsSet() {
-					return
-				}
-				var client *rpc.Client
-				var err error
-				client, err = rpc.DialHTTP("tcp", ip+":"+settings.SERVERPORT)
-				if err != nil {
-					log.Printf("LEADER(%d)：无法与Follower(%s)建立心跳连接！！！\n", this.CurrentTerm, ip)
-					return
-				}
-
-				hbAck := new(LogAckArg)
-				err = client.Call("RaftRPC.HeartBeat", hbReq, hbAck)
-				if err != nil {
-					log.Printf("LEADER(%d)：调用Follower(%s)的HeartBeat方法失败！！！\n", this.CurrentTerm, ip)
-				}
-				client.Close()
-
-				if hbAck.Term > this.CurrentTerm && this.active.IsSet() {
-					log.Printf("LEADER(%d)：过期了，转为Follower...\n", this.CurrentTerm)
-					this.CurrentTerm = hbAck.Term
-					rolestate := RoleState{settings.FOLLOWER, this.CurrentTerm}
-					select {
-					case *this.chan_role <- rolestate:
-						return
-					case <-time.After(time.Millisecond * time.Duration(settings.COMMIT_WAIT)):
-						return
-					}
-				}
-			}(ip, hbReq)
-		}
-		time.Sleep(settings.HEART_BEATS * time.Millisecond)
-	}
-	log.Printf("LEADER(%d)：心跳检测服务终止...\n", this.CurrentTerm)
 }
 
 func (this *Leader) replicateLog(ip string, next_index int) {
@@ -277,7 +217,7 @@ func (this *Leader) replicateLog(ip string, next_index int) {
 		return
 	}
 
-	if next_index < 0 {
+	if ip == "" || next_index < 1 {
 		return
 	}
 
@@ -285,8 +225,8 @@ func (this *Leader) replicateLog(ip string, next_index int) {
 
 	var preidx, pretem int
 
-	if next_index == 0 {
-		preidx = -1
+	if next_index == 1 { //此时复制第一个日志
+		preidx = 0
 	} else {
 		preLog := this.Logs.Get(next_index - 1)
 		preidx = next_index - 1
@@ -351,16 +291,15 @@ func (this *Leader) handleLogAck(ip string, next_index int, logAck *LogAckArg) {
 		select {
 		case *this.chan_role <- rolestate:
 			return
-		case <-time.After(time.Millisecond * time.Duration(settings.COMMIT_WAIT)):
+		case <-time.After(time.Millisecond * time.Duration(settings.CHANN_WAIT)):
 			return
 		}
-		return
 	}
 
 	//数据不一致，更新next_index重新replicate
 	if !logAck.Success {
 		log.Printf("LEADER(%d)：与Follower(%s)产生冲突，更新index重新replicate...\n", this.CurrentTerm, ip)
-		go this.replicateLog(ip, next_index-1)
+		go this.replicateLog(ip, next_index - 1)
 		return
 	}
 
@@ -379,13 +318,14 @@ func (this *Leader) updateCommitIndex(logIndex int) {
 		return
 	}
 
-	if logIndex < this.CommitIndex {
-		log.Printf("LEADER(%d)：无效日志记录!!!\n", this.CurrentTerm)
+	if logIndex <= this.CommitIndex {
+		log.Printf("LEADER(%d)：日志(%d)已提交!!!\n", this.CurrentTerm, logIndex)
 		go func() {
 			this.chan_commits <- this.CommitIndex
-			for _, ch_client := range this.Chan_clients {
-				ch_client <- this.CommitIndex
-			}
+			this.Clients.NotifyAll(this.CommitIndex)
+			//for _, ch_client := range this.Chan_clients {
+			//	ch_client <- this.CommitIndex
+			//}
 		}()
 		return
 	}
@@ -405,9 +345,10 @@ func (this *Leader) updateCommitIndex(logIndex int) {
 					log.Printf("LEADER(%d)：日志复制成功，当前commitIndex=%d\n", this.CurrentTerm, this.CommitIndex)
 					go func() {
 						this.chan_commits <- this.CommitIndex
-						for _, ch_client := range this.Chan_clients {
-							ch_client <- this.CommitIndex
-						}
+						this.Clients.NotifyAll(this.CommitIndex)
+						//for _, ch_client := range this.Chan_clients {
+						//	ch_client <- this.CommitIndex
+						//}
 					}()
 					return
 				}
