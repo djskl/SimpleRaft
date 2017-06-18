@@ -22,8 +22,6 @@ type Leader struct {
 	NextIndex  map[string]int
 	MatchIndex map[string]int
 
-	Clients *ClientWaitGroup
-
 	chan_newlog  chan int         //当有新日志到来时激活日志复制服务
 	chan_commits chan int         //更新了commit后，激活这个管道
 
@@ -81,40 +79,18 @@ func (this *Leader) HandleCommandReq(cmd string, cmdAck *CommandAck) error {
 		return nil
 	}
 
-	log.Printf("LEADER(%d)：收到客户端请求：%s\n", this.CurrentTerm, cmd)
-
-	_log := clog.LogItem{this.CurrentTerm, cmd}
+	_log := clog.LogItem{Term: this.CurrentTerm, Command: cmd}
 
 	pos := this.Logs.Add(_log)	//pos从1开始计数，第一个日志的pos为1
 
+	log.Printf("LEADER(%d)：收到客户端请求：%s(term: %d, index: %d)\n",
+		this.CurrentTerm, cmd, _log.Term, pos)
+
 	this.chan_newlog <- pos
 
-	chan_client := make(chan int)
-	this.Clients.Add(pos, chan_client)
-	for {
-		if !this.active.IsSet() {
-			cmdAck.Ok = false
-			cmdAck.LeaderIP = this.VotedFor
-			break
-		}
+	cmdAck.LeaderIP = this.IP
+	cmdAck.Ok = true
 
-		select {
-		case commitIdx := <-chan_client:
-			if commitIdx >= pos {
-				cmdAck.Ok = true
-				cmdAck.LeaderIP = this.VotedFor
-				cmdAck.Cmd = this.Logs.Get(pos).Command
-				this.Clients.Remove(pos)
-				log.Printf("LEADER(%d)：成功处理：%s\n", this.CurrentTerm, cmd)
-				return nil
-			}
-			break
-		case <-time.After(time.Millisecond * time.Duration(settings.CLIENT_WAIT)):
-			break	//跳出select循环，但不会跳出for循环
-		}
-
-	}
-	log.Printf("LEADER(%d)：处理失败：%s\n", this.CurrentTerm, cmd)
 	return nil
 }
 
@@ -235,7 +211,7 @@ func (this *Leader) replicateLog(ip string, next_index int) {
 
 	toSendEntries := this.Logs.GetFrom(next_index)
 	if toSendEntries != nil && len(toSendEntries) > 0 {
-		log.Printf("LEADER(%d)：向%s复制日志:%d...\n", this.CurrentTerm, ip, next_index)
+		log.Printf("LEADER(%d)：向%s复制日志(%d)...\n", this.CurrentTerm, ip, next_index)
 	} else {
 		//log.Printf("LEADER(%d)：向%s发送心跳信息...\n", this.CurrentTerm, ip)
 	}
@@ -283,7 +259,7 @@ func (this *Leader) replicateLog(ip string, next_index int) {
 	this.handleLogAck(ip, next_index, logAck)
 }
 
-func (this *Leader) handleLogAck(ip string, next_index int, logAck *LogAckArg) {
+func (this *Leader) handleLogAck(ip string, nextIndex int, logAck *LogAckArg) {
 	if !this.active.IsSet() {
 		return
 	}
@@ -304,11 +280,11 @@ func (this *Leader) handleLogAck(ip string, next_index int, logAck *LogAckArg) {
 	//数据不一致，更新next_index重新replicate
 	if !logAck.Success {
 		log.Printf("LEADER(%d)：与Follower(%s)产生冲突，更新index重新replicate...\n", this.CurrentTerm, ip)
-		go this.replicateLog(ip, next_index - 1)
+		go this.replicateLog(ip, nextIndex- 1)
 		return
 	}
 
-	if next_index == logAck.LastLogIndex + 1 {
+	if nextIndex == logAck.LastLogIndex + 1 {
 		//log.Printf("LEADER(%d)：收到Follower(%s)的心跳响应！！！\n", this.CurrentTerm, ip)
 		return
 	}
@@ -328,15 +304,6 @@ func (this *Leader) updateCommitIndex(newLogIndex int) {
 		return
 	}
 
-	//if newLogIndex <= this.CommitIndex {
-	//	log.Printf("LEADER(%d)：日志(%d)已提交!!!\n", this.CurrentTerm, newLogIndex)
-	//	go func() {
-	//		this.chan_commits <- this.CommitIndex
-	//		this.Clients.NotifyAll(this.CommitIndex)
-	//	}()
-	//	return
-	//}
-
 	for newLogIndex > this.CommitIndex {
 		_log := this.Logs.Get(newLogIndex)
 
@@ -351,9 +318,6 @@ func (this *Leader) updateCommitIndex(newLogIndex int) {
 					this.CommitIndex = match_idx
 					this.chan_commits <- this.CommitIndex
 					log.Printf("LEADER(%d)：日志复制成功，当前commitIndex=%d\n", this.CurrentTerm, this.CommitIndex)
-					go func() {
-						this.Clients.NotifyAll(this.CommitIndex)
-					}()
 					return
 				}
 			}

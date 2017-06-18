@@ -159,6 +159,7 @@ func (this *Follower) HandleVoteReq(args0 VoteReqArg, args1 *VoteAckArg) error {
 }
 
 func (this *Follower) HandleAppendLogReq(args0 LogAppArg, args1 *LogAckArg) error {
+
 	if !this.active.IsSet() {
 		return nil
 	}
@@ -195,9 +196,18 @@ func (this *Follower) HandleAppendLogReq(args0 LogAppArg, args1 *LogAckArg) erro
 	} else {
 		if args0.PreLogIndex > 0 {
 			preLog := this.Logs.Get(args0.PreLogIndex)
-			if preLog.Term != args0.PreLogTerm {
-				log.Printf("FOLLOWER(%d)：与leader(%s)的日志信息不一致\n", this.CurrentTerm, args0.LeaderID)
-				this.Logs.RemoveFrom(args0.PreLogIndex)
+			if preLog.Term != args0.PreLogTerm || preLog.Command == "" {
+				if preLog.Command == "" {
+					log.Printf("FOLLOWER(%d)：日志落后于leader(%s)：(FOLLOWER:%d/LEADER:%d)\n",
+						this.CurrentTerm, args0.LeaderID, this.Logs.Size(), args0.PreLogIndex)
+				} else if preLog.Term != args0.PreLogTerm {
+					log.Printf("FOLLOWER(%d)：与leader(%s)的日志信息不一致(%d/%d)\n",
+						this.CurrentTerm, args0.LeaderID, preLog.Term, args0.PreLogTerm)
+					this.Logs.RemoveFrom(args0.PreLogIndex)
+				}
+
+				args1.LastLogIndex = this.Logs.Size()
+				args1.Term = this.CurrentTerm
 				args1.Success = false
 				return nil
 			}
@@ -206,7 +216,7 @@ func (this *Follower) HandleAppendLogReq(args0 LogAppArg, args1 *LogAckArg) erro
 			this.CurrentTerm, args0.LeaderID, args0.PreLogTerm, args0.PreLogIndex, len(args0.Entries))
 	}
 
-	lastLogIdx := this.Logs.Extend(args0.Entries)
+	lastLogIdx := this.Logs.Extend(args0.PreLogIndex, args0.Entries)
 	args1.LastLogIndex = lastLogIdx
 	args1.Term = this.CurrentTerm
 	args1.Success = true

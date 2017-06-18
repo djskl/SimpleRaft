@@ -3,6 +3,8 @@ package main
 import (
 	"net/rpc"
 	"log"
+	"SimpleRaft/utils"
+	"time"
 )
 
 var ALLSERVERS = [5]string{"10.0.138.151", "10.0.138.152", "10.0.138.153", "10.0.138.155", "10.0.138.158"}
@@ -53,11 +55,7 @@ func Submit(cmd string) {
 	client.Close()
 
 	if ack.Ok {
-		if ack.Cmd == cmd {
-			log.Printf("命令：%s提交成功!!!\n", cmd)
-		} else {
-			log.Printf("命令：%s被覆盖(%s)!!!\n", cmd, ack.Cmd)
-		}
+		log.Printf("命令：%s提交成功!!!\n", cmd)
 	} else {
 		if ack.LeaderIP != "" {
 			log.Printf("LEADER_IP是：%s，重新提交...\n", ack.LeaderIP)
@@ -70,8 +68,14 @@ func Submit(cmd string) {
 }
 
 func main() {
-	ALLCMDS := []string{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9"}
-	for _, v := range ALLCMDS {
-		Submit(v)
+	for idx := 0; idx < 100; idx++ {
+		go func() {
+			for idy:=0;idy<10;idy++{
+				s := utils.GetUUID(5)
+				Submit(s)
+			}
+		}()
 	}
+	time.Sleep(time.Minute * 10)
+
 }

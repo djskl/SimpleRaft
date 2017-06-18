@@ -4,40 +4,7 @@ import (
 	"SimpleRaft/settings"
 	"log"
 	"SimpleRaft/db"
-	"sync"
 )
-
-type ClientWaitGroup struct {
-	clients map[int]chan int //leader确定提交了某项日志后，激活这一组管道
-	aLock sync.Mutex
-}
-
-func (this *ClientWaitGroup) Init() {
-	this.clients = make(map[int]chan int)
-}
-
-func (this *ClientWaitGroup) Add(pos int, ch chan int) {
-	if ch == nil {
-		panic("不能监听未初始化的管道")
-	}
-	this.aLock.Lock()
-	defer this.aLock.Unlock()
-	this.clients[pos] = ch
-}
-
-func (this *ClientWaitGroup) Remove(pos int) {
-	this.aLock.Lock()
-	defer this.aLock.Unlock()
-	delete(this.clients, pos)
-}
-
-func (this *ClientWaitGroup) NotifyAll(commitIdx int) {
-	this.aLock.Lock()
-	defer this.aLock.Unlock()
-	for _, ch_client := range this.clients {
-		ch_client <- commitIdx
-	}
-}
 
 
 type RaftManager struct {
@@ -49,8 +16,6 @@ type RaftManager struct {
 
 	role_stop chan bool
 	role_over chan bool
-
-	clients *ClientWaitGroup
 }
 
 func (this *RaftManager) Init() {
@@ -64,9 +29,6 @@ func (this *RaftManager) Init() {
 
 	this.br = &BaseRole{IP: this.CurrentIP}
 	this.br.Init()
-
-	this.clients = new(ClientWaitGroup)
-	this.clients.Init()
 
 	log.Printf("MANAGER：%s启动...\n", this.CurrentIP)
 
@@ -120,7 +82,6 @@ func (this *RaftManager) ConvertToRole(state RoleState) {
 			BaseRole:    this.br,
 			CurrentTerm: state.Term,
 			AllServers:  this.AllServers,
-			Clients: this.clients,
 		}
 	case settings.CANDIDATE:
 		this.rs = &Candidate{
