@@ -108,6 +108,7 @@ func (this *Leader) HandleCommandReq(cmd string, cmdAck *CommandAck) error {
 				log.Printf("LEADER(%d)：成功处理：%s\n", this.CurrentTerm, cmd)
 				return nil
 			}
+			break
 		case <-time.After(time.Millisecond * time.Duration(settings.CLIENT_WAIT)):
 			break	//跳出select循环，但不会跳出for循环
 		}
@@ -195,7 +196,7 @@ func (this *Leader) startLogApplService() {
 			break
 		}
 
-		for this.LastApplied <= this.CommitIndex {
+		for this.LastApplied < this.CommitIndex {
 			this.LastApplied++
 			_log := this.Logs.Get(this.LastApplied)
 			if _log.Command != "" {
@@ -205,9 +206,9 @@ func (this *Leader) startLogApplService() {
 		}
 		select {
 		case <-this.chan_commits:
-			//do nothing
+			break
 		case <-time.After(time.Millisecond*time.Duration(settings.COMMIT_WAIT)):
-			//do nothing
+			break
 		}
 	}
 	log.Printf("LEADER(%d)：日志应用服务终止！！！\n", this.CurrentTerm)
@@ -348,9 +349,9 @@ func (this *Leader) updateCommitIndex(newLogIndex int) {
 			if match_idx >= newLogIndex {
 				if nums++; nums >= settings.MAJORITY {
 					this.CommitIndex = match_idx
+					this.chan_commits <- this.CommitIndex
 					log.Printf("LEADER(%d)：日志复制成功，当前commitIndex=%d\n", this.CurrentTerm, this.CommitIndex)
 					go func() {
-						this.chan_commits <- this.CommitIndex
 						this.Clients.NotifyAll(this.CommitIndex)
 					}()
 					return

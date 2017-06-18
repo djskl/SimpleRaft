@@ -100,9 +100,9 @@ func (this *Follower) startLogApplService() {
 
 		select {
 		case <-this.chan_commits:
-			//do nothing
-		case <-time.After(time.Millisecond * time.Duration(settings.HEART_BEATS)):
-			//do nothing
+			break
+		case <-time.After(time.Millisecond * time.Duration(settings.COMMIT_WAIT)):
+			break
 		}
 	}
 	log.Printf("FOLLOWER(%d)：日志应用服务终止！！！\n", this.CurrentTerm)
