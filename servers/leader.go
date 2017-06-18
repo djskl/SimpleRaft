@@ -8,6 +8,7 @@ import (
 	"SimpleRaft/clog"
 	"time"
 	"SimpleRaft/utils"
+	"sync"
 )
 
 type Leader struct {
@@ -140,27 +141,23 @@ func (this *Leader) HandleAppendLogReq(args0 LogAppArg, args1 *LogAckArg) error 
 //日志replicate服务：有日志传日志，没日志传心跳
 func (this *Leader) startLogReplService() {
 	log.Printf("LEADER(%d)：启动replicate_log服务...\n", this.CurrentTerm)
-	for {
-		if !this.active.IsSet() {
-			break
-		}
-
-		for idx := 0; idx < len(this.AllServers); idx++ {
-			ip := this.AllServers[idx]
-			if ip == this.IP {
-				continue
-			}
-			next_index := this.NextIndex[ip]
-			go this.replicateLog(ip, next_index)
-		}
-
-		select {
-		case <-this.chan_newlog:
-			//do nothing
-		case <-time.After(time.Millisecond*time.Duration(settings.HEART_BEATS)):
-			//do nothing
-		}
+	if !this.active.IsSet() {
+		return
 	}
+	var wg sync.WaitGroup
+	nums := len(this.AllServers)
+	wg.Add(nums)
+	for idx := 0; idx < len(this.AllServers); idx++ {
+		ip := this.AllServers[idx]
+		if ip == this.IP {
+			continue
+		}
+		go func() {
+			defer wg.Done()
+			this.replicateLog(ip)
+		}()
+	}
+	wg.Wait()
 	log.Printf("LEADER(%d)：replicate_log服务终止！！！\n", this.CurrentTerm)
 }
 
@@ -190,73 +187,89 @@ func (this *Leader) startLogApplService() {
 	log.Printf("LEADER(%d)：日志应用服务终止！！！\n", this.CurrentTerm)
 }
 
-func (this *Leader) replicateLog(ip string, next_index int) {
+func (this *Leader) replicateLog(ip string) {
 	if !this.active.IsSet() {
 		return
 	}
-
-	if ip == "" || next_index < 1 {
-		return
-	}
-
-	var preidx, pretem int
-
-	if next_index == 1 { //此时复制第一个日志
-		preidx = 0
-	} else {
-		preLog := this.Logs.Get(next_index - 1)
-		preidx = next_index - 1
-		pretem = preLog.Term
-	}
-
-	toSendEntries := this.Logs.GetFrom(next_index)
-	if toSendEntries != nil && len(toSendEntries) > 0 {
-		log.Printf("LEADER(%d)：向%s复制日志(%d)...\n", this.CurrentTerm, ip, next_index)
-	} else {
-		//log.Printf("LEADER(%d)：向%s发送心跳信息...\n", this.CurrentTerm, ip)
-	}
-
-	logReq := LogAppArg{
-		Term:            this.CurrentTerm,
-		LeaderID:        this.IP,
-		LeaderCommitIdx: this.CommitIndex,
-		PreLogIndex:     preidx,
-		PreLogTerm:      pretem,
-		Entries:         toSendEntries,
-	}
-
-	logAck := new(LogAckArg)
-
-	var client *rpc.Client
-	var err error
+	sendHT := false
 	for {
+
 		if !this.active.IsSet() {
 			return
 		}
-		client, err = rpc.DialHTTP("tcp", ip+":"+settings.SERVERPORT)
-		if err != nil {
-			log.Printf("LEADER(%d)：无法与Follower(%s)建立数据连接！！！\n", this.CurrentTerm, ip)
-			time.Sleep(time.Millisecond*time.Duration(settings.RPC_WAIT))
-			continue
-		}
-		break
-	}
 
-	for {
-		if !this.active.IsSet() {
+		if this.NextIndex[ip] <= this.Logs.Size() || sendHT {
+			sendHT = false
+
+			var preidx, pretem int
+			next_index := this.NextIndex[ip]
+
+			if next_index == 1 { //此时复制第一个日志
+				preidx = 0
+			} else {
+				preLog := this.Logs.Get(next_index - 1)
+				preidx = next_index - 1
+				pretem = preLog.Term
+			}
+
+			toSendEntries := this.Logs.GetFrom(next_index)
+			if toSendEntries != nil && len(toSendEntries) > 0 {
+				log.Printf("LEADER(%d)：向%s复制日志(%d)...\n", this.CurrentTerm, ip, next_index)
+			} else {
+				//log.Printf("LEADER(%d)：向%s发送心跳信息...\n", this.CurrentTerm, ip)
+			}
+
+			logReq := LogAppArg{
+				Term:            this.CurrentTerm,
+				LeaderID:        this.IP,
+				LeaderCommitIdx: this.CommitIndex,
+				PreLogIndex:     preidx,
+				PreLogTerm:      pretem,
+				Entries:         toSendEntries,
+			}
+
+			logAck := new(LogAckArg)
+
+			var client *rpc.Client
+			var err error
+			for {
+				if !this.active.IsSet() {
+					return
+				}
+				client, err = rpc.DialHTTP("tcp", ip+":"+settings.SERVERPORT)
+				if err != nil {
+					log.Printf("LEADER(%d)：无法与Follower(%s)建立数据连接！！！\n", this.CurrentTerm, ip)
+					time.Sleep(time.Millisecond*time.Duration(settings.RPC_WAIT))
+					continue
+				}
+				break
+			}
+
+			for {
+				if !this.active.IsSet() {
+					client.Close()
+					return
+				}
+				err = client.Call("RaftRPC.AppendLog", logReq, logAck)
+				if err != nil {
+					log.Printf("LEADER(%d)：调用Follower(%s)的AppendLog方法失败！！！\n", this.CurrentTerm, ip)
+					time.Sleep(time.Millisecond*time.Duration(settings.RPC_WAIT))
+					continue
+				}
+				break
+			}
 			client.Close()
-			return
+			this.handleLogAck(ip, next_index, logAck)
+		} else {
+			select {
+			case <-this.chan_newlog:	//跳出等待
+				break
+			case <-time.After(time.Millisecond*time.Duration(settings.HEART_BEATS)):
+				sendHT = true
+				break
+			}
 		}
-		err = client.Call("RaftRPC.AppendLog", logReq, logAck)
-		if err != nil {
-			log.Printf("LEADER(%d)：调用Follower(%s)的AppendLog方法失败！！！\n", this.CurrentTerm, ip)
-			time.Sleep(time.Millisecond*time.Duration(settings.RPC_WAIT))
-			continue
-		}
-		break
 	}
-	client.Close()
-	this.handleLogAck(ip, next_index, logAck)
 }
 
 func (this *Leader) handleLogAck(ip string, nextIndex int, logAck *LogAckArg) {
@@ -280,7 +293,7 @@ func (this *Leader) handleLogAck(ip string, nextIndex int, logAck *LogAckArg) {
 	//数据不一致，更新next_index重新replicate
 	if !logAck.Success {
 		log.Printf("LEADER(%d)：与Follower(%s)产生冲突，更新index重新replicate...\n", this.CurrentTerm, ip)
-		go this.replicateLog(ip, nextIndex- 1)
+		this.NextIndex[ip]--
 		return
 	}
 

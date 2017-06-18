@@ -4,7 +4,7 @@ import (
 	"net/rpc"
 	"log"
 	"SimpleRaft/utils"
-	"time"
+	"sync"
 )
 
 var ALLSERVERS = [5]string{"10.0.138.151", "10.0.138.152", "10.0.138.153", "10.0.138.155", "10.0.138.158"}
@@ -68,14 +68,16 @@ func Submit(cmd string) {
 }
 
 func main() {
+	var wg sync.WaitGroup
+	wg.Add(100)
 	for idx := 0; idx < 100; idx++ {
 		go func() {
-			for idy:=0;idy<10;idy++{
+			defer wg.Done()
+			for idy:=0;idy<100;idy++{
 				s := utils.GetUUID(5)
 				Submit(s)
 			}
 		}()
 	}
-	time.Sleep(time.Minute * 10)
-
+	wg.Wait()
 }

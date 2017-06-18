@@ -92,10 +92,9 @@ func (this *Follower) startLogApplService() {
 		for this.LastApplied < this.CommitIndex {
 			this.LastApplied++
 			_log := this.Logs.Get(this.LastApplied)
-			if _log.Command != "" {
-				db.WriteToDisk(_log.Command)
-				log.Printf("FOLLOWER(%d): %d 已写到日志文件\n", this.CurrentTerm, this.LastApplied)
-			}
+			db.WriteToDisk(_log.Command)
+			log.Printf("FOLLOWER(%d): <NUM: %d, TERM: %d, CMD: %s> 已写到日志文件\n",
+				this.CurrentTerm, this.LastApplied, _log.Term, _log.Command)
 		}
 
 		select {
@@ -200,7 +199,9 @@ func (this *Follower) HandleAppendLogReq(args0 LogAppArg, args1 *LogAckArg) erro
 				if preLog.Command == "" {
 					log.Printf("FOLLOWER(%d)：日志落后于leader(%s)：(FOLLOWER:%d/LEADER:%d)\n",
 						this.CurrentTerm, args0.LeaderID, this.Logs.Size(), args0.PreLogIndex)
-				} else if preLog.Term != args0.PreLogTerm {
+				}
+
+				if preLog.Term != 0 && preLog.Term != args0.PreLogTerm {
 					log.Printf("FOLLOWER(%d)：与leader(%s)的日志信息不一致(%d/%d)\n",
 						this.CurrentTerm, args0.LeaderID, preLog.Term, args0.PreLogTerm)
 					this.Logs.RemoveFrom(args0.PreLogIndex)
