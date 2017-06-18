@@ -32,10 +32,16 @@ func Init() {
 		os.Remove(settings.DBPATH)
 	}
 
+	f, err := os.Create(settings.DBPATH)
+	if err != nil{
+		panic("数据库文件创建失败！！！")
+	}
+	defer f.Close()
+
 }
 
 func WriteToDisk(cnt string) {
-	outputFile, outputError := os.OpenFile(settings.DBPATH, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0666)
+	outputFile, outputError := os.OpenFile(settings.DBPATH, os.O_APPEND|os.O_WRONLY, 0666)
 	if outputError != nil {
 		log.Println("An error occurred with file opening")
 		return
@@ -52,6 +58,8 @@ func LoadServerIPS(fileName string) []string {
 	if err != nil {
 		panic(err)
 	}
+	defer f.Close()
+
 	var ips []string
 	var idx int = -1
 	buf := bufio.NewReader(f)

@@ -200,7 +200,7 @@ func (this *Leader) startLogApplService() {
 			_log := this.Logs.Get(this.LastApplied)
 			if _log.Command != "" {
 				db.WriteToDisk(_log.Command)
-				log.Printf("FOLLOWER(%d): %d 已写到日志文件\n", this.CurrentTerm, this.LastApplied)
+				log.Printf("LEADER(%d): %d 已写到日志文件\n", this.CurrentTerm, this.LastApplied)
 			}
 		}
 		select {
