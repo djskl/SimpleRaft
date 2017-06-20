@@ -3,8 +3,9 @@ package main
 import (
 	"net/rpc"
 	"log"
-	"SimpleRaft/utils"
 	"sync"
+	"math/rand"
+	"strconv"
 )
 
 var ALLSERVERS = [5]string{"10.0.138.151", "10.0.138.152", "10.0.138.153", "10.0.138.155", "10.0.138.158"}
@@ -74,8 +75,8 @@ func main() {
 		go func() {
 			defer wg.Done()
 			for idy:=0;idy<100;idy++{
-				s := utils.GetUUID(5)
-				Submit(s)
+				n := strconv.Itoa(rand.Intn(10))
+				Submit(n)
 			}
 		}()
 	}

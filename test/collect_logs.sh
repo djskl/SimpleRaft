@@ -5,5 +5,5 @@ servers=("10.0.138.151" "10.0.138.152" "10.0.138.153" "10.0.138.155" "10.0.138.1
 for idx in {0..4}
 do
     ip=${servers[$idx]}
-    scp ${ip}:/raftserver/db.dat /tmp/raft/${idx}.dat
+    scp ${ip}:/raftserver/db.dat /tmp/${idx}.dat
 done

@@ -216,7 +216,7 @@ func (this *Leader) replicateLog(ip string) {
 			if toSendEntries != nil && len(toSendEntries) > 0 {
 				log.Printf("LEADER(%d)：向%s复制日志(%d)...\n", this.CurrentTerm, ip, next_index)
 			} else {
-				//log.Printf("LEADER(%d)：向%s发送心跳信息...\n", this.CurrentTerm, ip)
+				log.Printf("LEADER(%d)：向%s发送心跳信息...\n", this.CurrentTerm, ip)
 			}
 
 			logReq := LogAppArg{

@@ -34,16 +34,10 @@ func (this *Manager) Extend(preIdx int, otherLogs []LogItem) int {
 			this.logs = append(this.logs, otherLogs...)
 		}
 
-		//if preIdx > len(this.logs) {
-		//	log.Panicf("日志添加位置错误(preIndex: %d, logSize: %d)！！！\n",
-		//		preIdx, len(this.logs))
-		//}
-
 		if preIdx < len(this.logs) {
 			this.logs = this.logs[:preIdx]
 			this.logs = append(this.logs, otherLogs...)
 		}
-
 	}
 	return len(this.logs)
 }

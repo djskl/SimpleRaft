@@ -59,16 +59,21 @@ func (this *Follower) StartAllService() {
 
 //定时服务，超时即切换到candidate状态
 func (this *Follower) startTimeOutService() {
-	log.Printf("FOLLOWER(%d)：启动计时服务...\n", this.CurrentTerm)
+	//log.Printf("FOLLOWER(%d)：启动计时服务...\n", this.CurrentTerm)
 	for {
 		if !this.active.IsSet() {
 			break
 		}
 		ot := time.Duration(rand.Intn(settings.TIMEOUT_MAX-settings.TIMEOUT_MIN) + settings.TIMEOUT_MIN)
 		select {
-		case <-this.chan_timeout:
-			//log.Printf("FOLLOWER(%d)：重置计时器...\n", this.CurrentTerm)
-			break
+		case st := <-this.chan_timeout:
+			if st {
+				log.Printf("FOLLOWER(%d)：暂停计时器...\n", this.CurrentTerm)
+				return
+			} else {
+				log.Printf("FOLLOWER(%d)：重置计时器...\n", this.CurrentTerm)
+				break
+			}
 		case <-time.After(ot * time.Millisecond):
 			if this.active.IsSet() {
 				log.Printf("FOLLOWER(%d)：Leader(%s)一直未响应，开始选举...\n", this.CurrentTerm, this.VotedFor)
@@ -135,9 +140,11 @@ func (this *Follower) HandleVoteReq(args0 VoteReqArg, args1 *VoteAckArg) error {
 			voteGranted = true
 		case t > 0:
 			voteGranted = false
+			log.Printf("FOLLOWER(%d)：不支持%s(Term:%d过期)\n", this.CurrentTerm, args0.CandidateID, args0.LastLogTerm)
 		case t == 0:
 			if lastLogIndex > args0.LastLogIndex {
 				voteGranted = false
+				log.Printf("FOLLOWER(%d)：不支持%s(日志不够新)\n", this.CurrentTerm, args0.CandidateID)
 			} else {
 				voteGranted = true
 			}
@@ -151,7 +158,6 @@ func (this *Follower) HandleVoteReq(args0 VoteReqArg, args1 *VoteAckArg) error {
 	} else {
 		args1.Term = this.CurrentTerm
 		args1.VoteGranted = false
-		log.Printf("FOLLOWER(%d)：不支持%s\n", this.CurrentTerm, args0.CandidateID)
 	}
 
 	return nil
@@ -169,14 +175,17 @@ func (this *Follower) HandleAppendLogReq(args0 LogAppArg, args1 *LogAckArg) erro
 		}
 		select {
 		case this.chan_timeout <- true:
+			defer func() {
+				go this.startTimeOutService()
+			}()
 			goto EndFor
 		case <-time.After(time.Millisecond * time.Duration(settings.CHANN_WAIT)):
 			break //跳出select
 		}
 	}
-	EndFor:
+EndFor:
 
-	//收到了过期leader的log_rpc
+//收到了过期leader的log_rpc
 	if args0.Term < this.CurrentTerm {
 		args1.Term = this.CurrentTerm
 		args1.Success = false
@@ -191,7 +200,7 @@ func (this *Follower) HandleAppendLogReq(args0 LogAppArg, args1 *LogAckArg) erro
 	//来自leader的心跳信息(更新commit index)
 	if args0.Entries == nil || len(args0.Entries) == 0 {
 		this.handleHeartBeat(args0)
-		//log.Printf("FOLLOWER(%d)：收到leader(%s)的心跳信息\n", this.CurrentTerm, args0.LeaderID)
+		log.Printf("FOLLOWER(%d)：收到leader(%s)的心跳信息\n", this.CurrentTerm, args0.LeaderID)
 	} else {
 		if args0.PreLogIndex > 0 {
 			preLog := this.Logs.Get(args0.PreLogIndex)
@@ -213,14 +222,19 @@ func (this *Follower) HandleAppendLogReq(args0 LogAppArg, args1 *LogAckArg) erro
 				return nil
 			}
 		}
-		log.Printf("FOLLOWER(%d)：收到leader(%s)的新日志记录(PreTerm: %d, PreIndex: %d, Size: %d)\n",
-			this.CurrentTerm, args0.LeaderID, args0.PreLogTerm, args0.PreLogIndex, len(args0.Entries))
 	}
 
 	lastLogIdx := this.Logs.Extend(args0.PreLogIndex, args0.Entries)
 	args1.LastLogIndex = lastLogIdx
 	args1.Term = this.CurrentTerm
 	args1.Success = true
+
+	if args0.Entries != nil && len(args0.Entries) > 0 {
+		log.Printf("FOLLOWER(%d)：收到leader(%s)的新日志(Totals: %d, PreTerm: %d, PreIndex: %d, Size: %d)\n",
+			this.CurrentTerm, args0.LeaderID, this.Logs.Size(), args0.PreLogTerm, args0.PreLogIndex, len(args0.Entries))
+	}
+
+	time.Sleep(time.Millisecond * time.Duration(rand.Intn(10000)))
 
 	return nil
 }
