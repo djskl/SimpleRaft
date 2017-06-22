@@ -9,6 +9,8 @@ import (
 	"strings"
 )
 
+var DBPATH string
+
 func PathExists(path string) (bool, error) {
 	_, err := os.Stat(path)
 	if err == nil {
@@ -20,7 +22,21 @@ func PathExists(path string) (bool, error) {
 	return false, err
 }
 
-func Init() {
+func InitDBFile(ip string) {
+
+	last_idx := strings.LastIndex(ip, ".")
+	num := ip[last_idx+1:]
+
+	DBPATH = settings.DB_DIR + num + ".dat"
+	fexists, err := PathExists(DBPATH)
+	if err != nil {
+		panic(err)
+	}
+
+	if fexists {
+		os.Remove(DBPATH)
+	}
+
 	exists, err := PathExists(settings.DB_DIR)
 	if err != nil {
 		panic(nil)
@@ -28,12 +44,10 @@ func Init() {
 
 	if !exists {
 		os.MkdirAll(settings.DB_DIR, 0777)
-	}else{
-		os.Remove(settings.DBPATH)
 	}
 
-	f, err := os.Create(settings.DBPATH)
-	if err != nil{
+	f, err := os.Create(DBPATH)
+	if err != nil {
 		panic("数据库文件创建失败！！！")
 	}
 	defer f.Close()
@@ -41,7 +55,7 @@ func Init() {
 }
 
 func WriteToDisk(cnt string) {
-	outputFile, outputError := os.OpenFile(settings.DBPATH, os.O_APPEND|os.O_WRONLY, 0666)
+	outputFile, outputError := os.OpenFile(DBPATH, os.O_APPEND|os.O_WRONLY, 0666)
 	if outputError != nil {
 		log.Panic("无法打开数据文件!!!")
 		return
@@ -62,7 +76,7 @@ func LoadLocalIP() string {
 		if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
 			if ipnet.IP.To4() != nil {
 				ip := ipnet.IP.String()
-				if ip != "192.168.16.1" && strings.Contains(ip, "192.168.16"){
+				if ip != "192.168.16.1" && strings.Contains(ip, "192.168.16") {
 					return ip
 				}
 			}
@@ -71,7 +85,7 @@ func LoadLocalIP() string {
 	return ""
 }
 
-func LoadServerIPS(fileName string) []string {
+func LoadServerIPS() []string {
 	allips := []string{
 		"192.168.16.2",
 		"192.168.16.3",

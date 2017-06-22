@@ -22,18 +22,18 @@ func (this *RaftManager) Init() {
 	this.role_stop = make(chan bool)
 	this.role_over = make(chan bool)
 
-	db.Init()
-
-	this.AllServers = db.LoadServerIPS(settings.IPFILE)
+	this.AllServers = db.LoadServerIPS()
 	this.CurrentIP = db.LoadLocalIP()
+
 	if this.CurrentIP == "" {
 		log.Panic("MANAGER：无法读取本机ip地址")
 	}
 
+	db.InitDBFile(this.CurrentIP)
+
 	this.br = &BaseRole{IP: this.CurrentIP}
 	this.br.Init()
 
-	log.Printf("MANAGER：%s启动...\n", this.CurrentIP)
 	log.Printf("MANAGER：本机ip地址：%s\n", this.CurrentIP)
 
 	this.rs = &Follower{BaseRole: this.br}
