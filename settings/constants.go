@@ -1,7 +1,7 @@
 package settings
 
 const TIMEOUT_MIN = 1000 	//1s
-const TIMEOUT_MAX = 2000	//2s
+const TIMEOUT_MAX = 5000	//5s
 
 const HEART_BEATS = 300 	//300ms
 
