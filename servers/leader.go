@@ -8,7 +8,6 @@ import (
 	"SimpleRaft/clog"
 	"time"
 	"SimpleRaft/utils"
-	"sync"
 )
 
 type Leader struct {
@@ -71,7 +70,7 @@ func (this *Leader) GetRoleChan() *chan RoleState {
 
 //启动所有服务
 func (this *Leader) StartAllService() {
-	go this.startLogReplService()
+	this.startLogReplService()
 	go this.startLogApplService()
 }
 
@@ -140,25 +139,16 @@ func (this *Leader) HandleAppendLogReq(args0 LogAppArg, args1 *LogAckArg) error 
 
 //日志replicate服务：有日志传日志，没日志传心跳
 func (this *Leader) startLogReplService() {
-	log.Printf("LEADER(%d)：启动replicate_log服务...\n", this.CurrentTerm)
 	if !this.active.IsSet() {
 		return
 	}
-	var wg sync.WaitGroup
-	nums := len(this.AllServers)
-	wg.Add(nums)
 	for idx := 0; idx < len(this.AllServers); idx++ {
 		ip := this.AllServers[idx]
 		if ip == this.IP {
 			continue
 		}
-		go func() {
-			defer wg.Done()
-			this.replicateLog(ip)
-		}()
+		go this.replicateLog(ip)
 	}
-	wg.Wait()
-	log.Printf("LEADER(%d)：replicate_log服务终止！！！\n", this.CurrentTerm)
 }
 
 //日志应用服务(更新lastApplied)
@@ -188,12 +178,8 @@ func (this *Leader) startLogApplService() {
 }
 
 func (this *Leader) replicateLog(ip string) {
-	if !this.active.IsSet() {
-		return
-	}
 	sendHT := false
 	for {
-
 		if !this.active.IsSet() {
 			return
 		}

@@ -25,12 +25,16 @@ func (this *RaftManager) Init() {
 	db.Init()
 
 	this.AllServers = db.LoadServerIPS(settings.IPFILE)
-	this.CurrentIP = this.AllServers[0]
+	this.CurrentIP = db.LoadLocalIP()
+	if this.CurrentIP == "" {
+		log.Panic("MANAGER：无法读取本机ip地址")
+	}
 
 	this.br = &BaseRole{IP: this.CurrentIP}
 	this.br.Init()
 
 	log.Printf("MANAGER：%s启动...\n", this.CurrentIP)
+	log.Printf("MANAGER：本机ip地址：%s\n", this.CurrentIP)
 
 	this.rs = &Follower{BaseRole: this.br}
 	this.rs.Init()
