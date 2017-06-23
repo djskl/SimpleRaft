@@ -5,7 +5,7 @@ const TIMEOUT_MAX = 5000	//5s
 
 const HEART_BEATS = 300 	//300ms
 
-const COMMIT_WAIT = 1000	//1s
+const COMMIT_WAIT = 3000	//1s
 
 const CHANN_WAIT = 1000		//1s
 

@@ -23,7 +23,6 @@ type Leader struct {
 	MatchIndex map[string]int
 
 	chan_newlog  chan int         //当有新日志到来时激活日志复制服务
-	chan_commits chan int         //更新了commit后，激活这个管道
 
 	//角色是否处于激活状态，供角色启动的子协程参考
 	//用指针防止copy
@@ -41,7 +40,6 @@ func (this *Leader) Init() error {
 	this.active.Set()
 
 	this.chan_newlog = make(chan int)
-	this.chan_commits = make(chan int)
 
 	this.MatchIndex = make(map[string]int)
 	this.NextIndex = make(map[string]int)
@@ -167,12 +165,9 @@ func (this *Leader) startLogApplService() {
 				log.Printf("LEADER(%d): %d 已写到日志文件\n", this.CurrentTerm, this.LastApplied)
 			}
 		}
-		select {
-		case <-this.chan_commits:
-			break
-		case <-time.After(time.Millisecond*time.Duration(settings.COMMIT_WAIT)):
-			break
-		}
+
+		time.Sleep(time.Millisecond*time.Duration(settings.COMMIT_WAIT))
+
 	}
 	log.Printf("LEADER(%d)：日志应用服务终止！！！\n", this.CurrentTerm)
 }
@@ -259,7 +254,9 @@ func (this *Leader) replicateLog(ip string) {
 }
 
 func (this *Leader) handleLogAck(ip string, nextIndex int, logAck *LogAckArg) {
+
 	if !this.active.IsSet() {
+		log.Printf("LEADER(%d)：过期LEADER！！！收到Follower(%s)响应信息！！！\n", this.CurrentTerm, ip)
 		return
 	}
 
@@ -284,7 +281,7 @@ func (this *Leader) handleLogAck(ip string, nextIndex int, logAck *LogAckArg) {
 	}
 
 	if nextIndex == logAck.LastLogIndex + 1 {
-		//log.Printf("LEADER(%d)：收到Follower(%s)的心跳响应！！！\n", this.CurrentTerm, ip)
+		log.Printf("LEADER(%d)：收到Follower(%s)的心跳响应！！！\n", this.CurrentTerm, ip)
 		return
 	}
 
@@ -304,10 +301,11 @@ func (this *Leader) updateCommitIndex(newLogIndex int) {
 	}
 
 	for newLogIndex > this.CommitIndex {
+
 		_log := this.Logs.Get(newLogIndex)
 
 		if _log.Term < this.CurrentTerm { //不能提交上一个term的日志
-			continue
+            break
 		}
 
 		nums := 1
@@ -315,7 +313,6 @@ func (this *Leader) updateCommitIndex(newLogIndex int) {
 			if match_idx >= newLogIndex {
 				if nums++; nums >= settings.MAJORITY {
 					this.CommitIndex = match_idx
-					this.chan_commits <- this.CommitIndex
 					log.Printf("LEADER(%d)：日志复制成功，当前commitIndex=%d\n", this.CurrentTerm, this.CommitIndex)
 					return
 				}

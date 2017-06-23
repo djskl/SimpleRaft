@@ -16,7 +16,6 @@ type Follower struct {
 	CurrentTerm int
 	VotedFor    string
 
-	chan_commits chan int  //更新了commit后，激活这个管道
 	chan_timeout chan bool //定时管道
 
 	//角色是否处于激活状态，供角色启动的子协程参考
@@ -32,7 +31,6 @@ func (this *Follower) Init() error {
 	this.active = new(utils.AtomicBool)
 	this.active.Set()
 
-	this.chan_commits = make(chan int)
 	this.chan_timeout = make(chan bool)
 
 	log.Printf("FOLLOWER(%d)：初始化...\n", this.CurrentTerm)
@@ -59,12 +57,12 @@ func (this *Follower) StartAllService() {
 
 //定时服务，超时即切换到candidate状态
 func (this *Follower) startTimeOutService() {
-	//log.Printf("FOLLOWER(%d)：启动计时服务...\n", this.CurrentTerm)
 	for {
 		if !this.active.IsSet() {
 			break
 		}
 		ot := time.Duration(rand.Intn(settings.TIMEOUT_MAX-settings.TIMEOUT_MIN) + settings.TIMEOUT_MIN)
+		log.Printf("FOLLOWER(%d)：启动计时服务(%d毫秒)...\n", this.CurrentTerm, ot)
 		select {
 		case st := <-this.chan_timeout:
 			if st {
@@ -102,12 +100,7 @@ func (this *Follower) startLogApplService() {
 				this.CurrentTerm, this.LastApplied, _log.Term, _log.Command)
 		}
 
-		select {
-		case <-this.chan_commits:
-			break
-		case <-time.After(time.Millisecond * time.Duration(settings.COMMIT_WAIT)):
-			break
-		}
+		time.Sleep(time.Millisecond * time.Duration(settings.COMMIT_WAIT))
 	}
 	log.Printf("FOLLOWER(%d)：日志应用服务终止！！！\n", this.CurrentTerm)
 }
@@ -200,7 +193,6 @@ EndFor:
 	//来自leader的心跳信息(更新commit index)
 	if args0.Entries == nil || len(args0.Entries) == 0 {
 		this.handleHeartBeat(args0)
-		log.Printf("FOLLOWER(%d)：收到leader(%s)的心跳信息\n", this.CurrentTerm, args0.LeaderID)
 	} else {
 		if args0.PreLogIndex > 0 {
 			preLog := this.Logs.Get(args0.PreLogIndex)
@@ -229,12 +221,14 @@ EndFor:
 	args1.Term = this.CurrentTerm
 	args1.Success = true
 
+	time.Sleep(time.Millisecond * time.Duration(rand.Intn(10000)))
+
 	if args0.Entries != nil && len(args0.Entries) > 0 {
 		log.Printf("FOLLOWER(%d)：收到leader(%s)的新日志(Totals: %d, PreTerm: %d, PreIndex: %d, Size: %d)\n",
 			this.CurrentTerm, args0.LeaderID, this.Logs.Size(), args0.PreLogTerm, args0.PreLogIndex, len(args0.Entries))
+	} else {
+		log.Printf("FOLLOWER(%d)：收到leader(%s)的心跳信息\n", this.CurrentTerm, args0.LeaderID)
 	}
-
-	time.Sleep(time.Millisecond * time.Duration(rand.Intn(10000)))
 
 	return nil
 }
@@ -251,18 +245,6 @@ func (this *Follower) handleHeartBeat(args0 LogAppArg) error {
 		} else {
 			this.CommitIndex = args0.LeaderCommitIdx
 		}
-
-		go func() {
-			if !this.active.IsSet() {
-				return
-			}
-			select {
-			case this.chan_commits <- this.CommitIndex:
-				return
-			case <-time.After(time.Millisecond * time.Duration(settings.COMMIT_WAIT)):
-				return
-			}
-		}()
 	}
 	return nil
 }
