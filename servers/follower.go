@@ -191,9 +191,7 @@ EndFor:
 	this.CurrentTerm = args0.Term
 
 	//来自leader的心跳信息(更新commit index)
-	if args0.Entries == nil || len(args0.Entries) == 0 {
-		this.handleHeartBeat(args0)
-	} else {
+	if args0.Entries != nil && len(args0.Entries) > 0 {
 		if args0.PreLogIndex > 0 {
 			preLog := this.Logs.Get(args0.PreLogIndex)
 			if preLog.Term != args0.PreLogTerm || preLog.Command == "" {
@@ -221,6 +219,8 @@ EndFor:
 	args1.Term = this.CurrentTerm
 	args1.Success = true
 
+	this.updateCommitIdx(args0)
+
 	time.Sleep(time.Millisecond * time.Duration(rand.Intn(10000)))
 
 	if args0.Entries != nil && len(args0.Entries) > 0 {
@@ -233,7 +233,7 @@ EndFor:
 	return nil
 }
 
-func (this *Follower) handleHeartBeat(args0 LogAppArg) error {
+func (this *Follower) updateCommitIdx(args0 LogAppArg) error {
 	if !this.active.IsSet() {
 		return nil
 	}
