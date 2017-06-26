@@ -1,0 +1,26 @@
+### DockerFile
+from Fedora
+
+RUN dnf intall golang net-tools iputils vim-enhanced -y
+RUN setcap cap_net_raw+ep /bin/ping
+
+RUN mkdir /opt/golang
+RUN mkdir /opt/golang/src
+RUN mkdir /opt/golang/pkg
+RUN mkdir /opt/golang/bin
+
+ENV GOPATH /opt/golang
+
+CMD ["/bin/bash"]
+
+
+### 创建一个容器共用的局域网
+docker network create -o "com.docker.network.bridge.name"="rafts" --subnet 192.168.16.0/24 rafts
+
+
+### 容器启动命令
+docker run -i -t -v /root/gcodes:/opt/golang -v /tmp:/tmp --net=rafts --ip=192.168.16.11 -w=/opt/golang/src/SimpleRaft --name=r1 raft go run main.go
+docker run -i -t -v /root/gcodes:/opt/golang -v /tmp:/tmp --net=rafts --ip=192.168.16.12 -w=/opt/golang/src/SimpleRaft --name=r2 raft go run main.go
+docker run -i -t -v /root/gcodes:/opt/golang -v /tmp:/tmp --net=rafts --ip=192.168.16.13 -w=/opt/golang/src/SimpleRaft --name=r3 raft go run main.go
+docker run -i -t -v /root/gcodes:/opt/golang -v /tmp:/tmp --net=rafts --ip=192.168.16.14 -w=/opt/golang/src/SimpleRaft --name=r4 raft go run main.go
+docker run -i -t -v /root/gcodes:/opt/golang -v /tmp:/tmp --net=rafts --ip=192.168.16.15 -w=/opt/golang/src/SimpleRaft --name=r5 raft go run main.go
