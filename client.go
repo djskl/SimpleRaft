@@ -6,6 +6,7 @@ import (
 	"sync"
 	"math/rand"
 	"strconv"
+	"time"
 )
 
 var ALLSERVERS = [5]string{"192.168.16.2", "192.168.16.3", "192.168.16.4", "192.168.16.5", "192.168.16.6"}
@@ -77,6 +78,7 @@ func main() {
 			for idy:=0;idy<100;idy++{
 				n := strconv.Itoa(rand.Intn(10))
 				Submit(n)
+				time.Sleep(time.Duration(500 + rand.Intn(500))*time.Millisecond)
 			}
 		}()
 	}

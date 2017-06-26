@@ -8,6 +8,7 @@ import (
 	"SimpleRaft/clog"
 	"time"
 	"SimpleRaft/utils"
+	"SimpleRaft/cmap"
 )
 
 type Leader struct {
@@ -19,8 +20,8 @@ type Leader struct {
 
 	AllServers []string
 	
-	NextIndex  map[string]int
-	MatchIndex map[string]int
+	NextIndex  cmap.ConcurrentMap
+	MatchIndex cmap.ConcurrentMap
 
 	chan_newlog  chan int         //当有新日志到来时激活日志复制服务
 
@@ -41,12 +42,12 @@ func (this *Leader) Init() error {
 
 	this.chan_newlog = make(chan int)
 
-	this.MatchIndex = make(map[string]int)
-	this.NextIndex = make(map[string]int)
+	this.MatchIndex = cmap.New()
+	this.NextIndex = cmap.New()
 
 	log_length := this.Logs.Size()
 	for _, ip := range this.AllServers {
-		this.NextIndex[ip] = log_length + 1
+		this.NextIndex.Set(ip, log_length + 1)
 	}
 
 	log.Printf("LEADER(%d)：初始化...\n", this.CurrentTerm)
@@ -178,24 +179,24 @@ func (this *Leader) replicateLog(ip string) {
 		if !this.active.IsSet() {
 			return
 		}
-
-		if this.NextIndex[ip] <= this.Logs.Size() || sendHT {
+		val, _ := this.NextIndex.Get(ip)
+		nextIdx := val.(int)
+		if nextIdx <= this.Logs.Size() || sendHT {
 			sendHT = false
 
 			var preidx, pretem int
-			next_index := this.NextIndex[ip]
 
-			if next_index == 1 { //此时复制第一个日志
+			if nextIdx == 1 { //此时复制第一个日志
 				preidx = 0
 			} else {
-				preLog := this.Logs.Get(next_index - 1)
-				preidx = next_index - 1
+				preLog := this.Logs.Get(nextIdx - 1)
+				preidx = nextIdx - 1
 				pretem = preLog.Term
 			}
 
-			toSendEntries := this.Logs.GetFrom(next_index)
+			toSendEntries := this.Logs.GetFrom(nextIdx)
 			if toSendEntries != nil && len(toSendEntries) > 0 {
-				log.Printf("LEADER(%d)：向%s复制日志(%d)...\n", this.CurrentTerm, ip, next_index)
+				log.Printf("LEADER(%d)：向%s复制日志(%d)...\n", this.CurrentTerm, ip, nextIdx)
 			} else {
 				log.Printf("LEADER(%d)：向%s发送心跳信息...\n", this.CurrentTerm, ip)
 			}
@@ -240,7 +241,7 @@ func (this *Leader) replicateLog(ip string) {
 				break
 			}
 			client.Close()
-			this.handleLogAck(ip, next_index, logAck)
+			this.handleLogAck(ip, nextIdx, logAck)
 		} else {
 			select {
 			case <-this.chan_newlog:	//跳出等待
@@ -276,7 +277,9 @@ func (this *Leader) handleLogAck(ip string, nextIndex int, logAck *LogAckArg) {
 	//数据不一致，更新next_index重新replicate
 	if !logAck.Success {
 		log.Printf("LEADER(%d)：与Follower(%s)产生冲突，更新index重新replicate...\n", this.CurrentTerm, ip)
-		this.NextIndex[ip]--
+		tmp, _ := this.NextIndex.Get(ip)
+		oldIdx := tmp.(int)
+		this.NextIndex.Set(ip, oldIdx-1)
 		return
 	}
 
@@ -285,8 +288,8 @@ func (this *Leader) handleLogAck(ip string, nextIndex int, logAck *LogAckArg) {
 		return
 	}
 
-	this.NextIndex[ip] = logAck.LastLogIndex + 1
-	this.MatchIndex[ip] = logAck.LastLogIndex
+	this.NextIndex.Set(ip, logAck.LastLogIndex + 1)
+	this.MatchIndex.Set(ip, logAck.LastLogIndex)
 
 	this.updateCommitIndex(logAck.LastLogIndex)
 
@@ -309,10 +312,11 @@ func (this *Leader) updateCommitIndex(newLogIndex int) {
 		}
 
 		nums := 1
-		for _, match_idx := range this.MatchIndex {
-			if match_idx >= newLogIndex {
+		for obj := range this.MatchIndex.IterBuffered() {
+			matchIdx := obj.Val.(int)
+			if matchIdx >= newLogIndex {
 				if nums++; nums >= settings.MAJORITY {
-					this.CommitIndex = match_idx
+					this.CommitIndex = matchIdx
 					log.Printf("LEADER(%d)：日志复制成功，当前commitIndex=%d\n", this.CurrentTerm, this.CommitIndex)
 					return
 				}
