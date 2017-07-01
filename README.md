@@ -1,3 +1,3 @@
-基于论文《[In Search of an Understandable Consensus Algorithm](https://raft.github.io/raft.pdf)》实现，可以保证**Election Safety**, **Leader Append-Only**, **Log Matching**, **Leader Completeness**, **State Machine Safety**，但不支持集群成员变更、日志压缩备份。
+基于论文《[In Search of an Understandable Consensus Algorithm](https://raft.github.io/raft.pdf)》实现，基本可用，但不支持集群成员变更、日志压缩备份。
 
-**注意** : Follower中加入了随机延迟来模拟网络延迟
+加入了DEBUG模式，在DEBUG模式下，leader选举以及follower端的日志接收，可通过键盘控制(输入`N`表示`否`，直接回车或其他任意字符表示`是`)
