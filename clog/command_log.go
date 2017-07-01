@@ -2,6 +2,7 @@ package clog
 
 import (
 	"sync"
+	"SimpleRaft/utils"
 )
 
 //日志项
@@ -48,14 +49,31 @@ func (this *Manager) Size() int {
 	return len(this.logs)
 }
 
-func (this *Manager) Get(idx int) LogItem {
+func (this *Manager) Get(idx int) (LogItem, error) {
 	this.lock.RLock()
 	defer this.lock.RUnlock()
 	size := len(this.logs)
 	if idx < 1 || size == 0 || idx > size {
-		return LogItem{}
+		return LogItem{}, utils.NotExistsError{"日志不存在"}
 	}
-	return this.logs[idx-1]
+	return this.logs[idx-1], nil
+}
+
+func (this *Manager) GetMany(beg int, end int) []LogItem {
+	this.lock.RLock()
+	defer this.lock.RUnlock()
+
+	size := len(this.logs)
+	if beg < 1 || beg > size {
+		return nil
+	}
+
+	if end < beg || end > size + 1 {
+		return nil
+	}
+
+	return this.logs[beg-1:end-1]
+
 }
 
 func (this *Manager) GetFrom(idx int) []LogItem {

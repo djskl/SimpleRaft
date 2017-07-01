@@ -19,15 +19,15 @@ type Leader struct {
 	VotedFor    string
 
 	AllServers []string
-	
+
 	NextIndex  cmap.ConcurrentMap
 	MatchIndex cmap.ConcurrentMap
 
-	chan_newlog  chan int         //当有新日志到来时激活日志复制服务
+	chan_newlog chan int //当有新日志到来时激活日志复制服务
 
 	//角色是否处于激活状态，供角色启动的子协程参考
 	//用指针防止copy
-	active *utils.AtomicBool
+	active    *utils.AtomicBool
 	chan_role *chan RoleState
 }
 
@@ -47,7 +47,7 @@ func (this *Leader) Init() error {
 
 	log_length := this.Logs.Size()
 	for _, ip := range this.AllServers {
-		this.NextIndex.Set(ip, log_length + 1)
+		this.NextIndex.Set(ip, log_length+1)
 	}
 
 	log.Printf("LEADER(%d)：初始化...\n", this.CurrentTerm)
@@ -55,7 +55,7 @@ func (this *Leader) Init() error {
 	return nil
 }
 
-func (this *Leader) SetAlive(alive bool){
+func (this *Leader) SetAlive(alive bool) {
 	this.active.SetTo(alive)
 }
 
@@ -80,7 +80,7 @@ func (this *Leader) HandleCommandReq(cmd string, cmdAck *CommandAck) error {
 
 	_log := clog.LogItem{Term: this.CurrentTerm, Command: cmd}
 
-	pos := this.Logs.Add(_log)	//pos从1开始计数，第一个日志的pos为1
+	pos := this.Logs.Add(_log) //pos从1开始计数，第一个日志的pos为1
 
 	log.Printf("LEADER(%d)：收到客户端请求：%s(term: %d, index: %d)\n",
 		this.CurrentTerm, cmd, _log.Term, pos)
@@ -160,14 +160,14 @@ func (this *Leader) startLogApplService() {
 
 		for this.LastApplied < this.CommitIndex {
 			this.LastApplied++
-			_log := this.Logs.Get(this.LastApplied)
-			if _log.Command != "" {
+			_log, err := this.Logs.Get(this.LastApplied)
+			if err == nil {
 				db.WriteToDisk(_log.Command)
 				log.Printf("LEADER(%d): %d 已写到日志文件\n", this.CurrentTerm, this.LastApplied)
 			}
 		}
 
-		time.Sleep(time.Millisecond*time.Duration(settings.COMMIT_WAIT))
+		time.Sleep(time.Millisecond * time.Duration(settings.COMMIT_WAIT))
 
 	}
 	log.Printf("LEADER(%d)：日志应用服务终止！！！\n", this.CurrentTerm)
@@ -189,16 +189,20 @@ func (this *Leader) replicateLog(ip string) {
 			if nextIdx == 1 { //此时复制第一个日志
 				preidx = 0
 			} else {
-				preLog := this.Logs.Get(nextIdx - 1)
-				preidx = nextIdx - 1
-				pretem = preLog.Term
+				preLog, err := this.Logs.Get(nextIdx - 1)
+				if err != nil {
+					log.Printf("LEADER(%d)：当前日志(index: %d)不存在\n", this.CurrentTerm, nextIdx-1)
+				} else {
+					preidx = nextIdx - 1
+					pretem = preLog.Term
+				}
 			}
 
-			toSendEntries := this.Logs.GetFrom(nextIdx)
+			toSendEntries := this.Logs.GetMany(nextIdx, nextIdx+1)
 			if toSendEntries != nil && len(toSendEntries) > 0 {
 				log.Printf("LEADER(%d)：向%s复制日志(%d)...\n", this.CurrentTerm, ip, nextIdx)
 			} else {
-				log.Printf("LEADER(%d)：向%s发送心跳信息...\n", this.CurrentTerm, ip)
+				//log.Printf("LEADER(%d)：向%s发送心跳信息...\n", this.CurrentTerm, ip)
 			}
 
 			logReq := LogAppArg{
@@ -221,7 +225,7 @@ func (this *Leader) replicateLog(ip string) {
 				client, err = rpc.DialHTTP("tcp", ip+":"+settings.SERVERPORT)
 				if err != nil {
 					log.Printf("LEADER(%d)：无法与Follower(%s)建立数据连接！！！\n", this.CurrentTerm, ip)
-					time.Sleep(time.Millisecond*time.Duration(settings.RPC_WAIT))
+					time.Sleep(time.Millisecond * time.Duration(settings.RPC_WAIT))
 					continue
 				}
 				break
@@ -235,7 +239,7 @@ func (this *Leader) replicateLog(ip string) {
 				err = client.Call("RaftRPC.AppendLog", logReq, logAck)
 				if err != nil {
 					log.Printf("LEADER(%d)：调用Follower(%s)的AppendLog方法失败！！！\n", this.CurrentTerm, ip)
-					time.Sleep(time.Millisecond*time.Duration(settings.RPC_WAIT))
+					time.Sleep(time.Millisecond * time.Duration(settings.RPC_WAIT))
 					continue
 				}
 				break
@@ -244,9 +248,9 @@ func (this *Leader) replicateLog(ip string) {
 			this.handleLogAck(ip, nextIdx, logAck)
 		} else {
 			select {
-			case <-this.chan_newlog:	//跳出等待
+			case <-this.chan_newlog: //跳出等待
 				break
-			case <-time.After(time.Millisecond*time.Duration(settings.HEART_BEATS)):
+			case <-time.After(time.Millisecond * time.Duration(settings.HEART_BEATS)):
 				sendHT = true
 				break
 			}
@@ -283,16 +287,14 @@ func (this *Leader) handleLogAck(ip string, nextIndex int, logAck *LogAckArg) {
 		return
 	}
 
-	if nextIndex == logAck.LastLogIndex + 1 {
-		log.Printf("LEADER(%d)：收到Follower(%s)的心跳响应！！！\n", this.CurrentTerm, ip)
-		return
+	if nextIndex == logAck.LastLogIndex+1 {
+		//log.Printf("LEADER(%d)：收到Follower(%s)的心跳响应！！！\n", this.CurrentTerm, ip)
+	} else {
+		this.NextIndex.Set(ip, logAck.LastLogIndex+1)
+		this.MatchIndex.Set(ip, logAck.LastLogIndex)
+		this.updateCommitIndex(logAck.LastLogIndex)
+		log.Printf("LEADER(%d)：收到Follower(%s)的日志响应！！！\n", this.CurrentTerm, ip)
 	}
-
-	this.NextIndex.Set(ip, logAck.LastLogIndex + 1)
-	this.MatchIndex.Set(ip, logAck.LastLogIndex)
-
-	this.updateCommitIndex(logAck.LastLogIndex)
-
 }
 
 // If there exists an N such that N > commitIndex,
@@ -305,10 +307,10 @@ func (this *Leader) updateCommitIndex(newLogIndex int) {
 
 	for newLogIndex > this.CommitIndex {
 
-		_log := this.Logs.Get(newLogIndex)
+		_log, err := this.Logs.Get(newLogIndex)
 
-		if _log.Term < this.CurrentTerm { //不能提交上一个term的日志
-            break
+		if _log.Term < this.CurrentTerm || err != nil { //不能提交上一个term的日志
+			break
 		}
 
 		nums := 1

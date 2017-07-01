@@ -62,14 +62,14 @@ func (this *Follower) startTimeOutService() {
 			break
 		}
 		ot := time.Duration(rand.Intn(settings.TIMEOUT_MAX-settings.TIMEOUT_MIN) + settings.TIMEOUT_MIN)
-		log.Printf("FOLLOWER(%d)：启动计时服务(%d毫秒)...\n", this.CurrentTerm, ot)
+		//log.Printf("FOLLOWER(%d)：启动计时服务(%d毫秒)...\n", this.CurrentTerm, ot)
 		select {
 		case st := <-this.chan_timeout:
 			if st {
-				log.Printf("FOLLOWER(%d)：暂停计时器...\n", this.CurrentTerm)
+				//log.Printf("FOLLOWER(%d)：暂停计时器...\n", this.CurrentTerm)
 				return
 			} else {
-				log.Printf("FOLLOWER(%d)：重置计时器...\n", this.CurrentTerm)
+				//log.Printf("FOLLOWER(%d)：重置计时器...\n", this.CurrentTerm)
 				break
 			}
 		case <-time.After(ot * time.Millisecond):
@@ -94,7 +94,11 @@ func (this *Follower) startLogApplService() {
 		}
 		for this.LastApplied < this.CommitIndex {
 			this.LastApplied++
-			_log := this.Logs.Get(this.LastApplied)
+			_log, err := this.Logs.Get(this.LastApplied)
+			if err != nil {
+				log.Printf("CANDIDATE(%d)：log日志为空!!!\n", this.CurrentTerm)
+				continue
+			}
 			db.WriteToDisk(_log.Command)
 			log.Printf("FOLLOWER(%d): <NUM: %d, TERM: %d, CMD: %s> 已写到日志文件\n",
 				this.CurrentTerm, this.LastApplied, _log.Term, _log.Command)
@@ -125,21 +129,24 @@ func (this *Follower) HandleVoteReq(args0 VoteReqArg, args1 *VoteAckArg) error {
 	voteGranted := false
 	if this.VotedFor == args0.CandidateID || this.VotedFor == "" { //比较谁包含的日志记录更新更长
 		lastLogIndex := this.Logs.Size()
-		lastLog := this.Logs.Get(lastLogIndex)
-
-		t := lastLog.Term - args0.LastLogTerm
-		switch {
-		case t < 0:
+		lastLog, err := this.Logs.Get(lastLogIndex)
+		if err != nil {
 			voteGranted = true
-		case t > 0:
-			voteGranted = false
-			log.Printf("FOLLOWER(%d)：不支持%s(Term:%d过期)\n", this.CurrentTerm, args0.CandidateID, args0.LastLogTerm)
-		case t == 0:
-			if lastLogIndex > args0.LastLogIndex {
-				voteGranted = false
-				log.Printf("FOLLOWER(%d)：不支持%s(日志不够新)\n", this.CurrentTerm, args0.CandidateID)
-			} else {
+		}else{
+			t := lastLog.Term - args0.LastLogTerm
+			switch {
+			case t < 0:
 				voteGranted = true
+			case t > 0:
+				voteGranted = false
+				log.Printf("FOLLOWER(%d)：不支持%s(Term:%d过期)\n", this.CurrentTerm, args0.CandidateID, args0.LastLogTerm)
+			case t == 0:
+				if lastLogIndex > args0.LastLogIndex {
+					voteGranted = false
+					log.Printf("FOLLOWER(%d)：不支持%s(日志不够新)\n", this.CurrentTerm, args0.CandidateID)
+				} else {
+					voteGranted = true
+				}
 			}
 		}
 	}
@@ -190,11 +197,10 @@ EndFor:
 
 	this.CurrentTerm = args0.Term
 
-	//来自leader的心跳信息(更新commit index)
 	if args0.Entries != nil && len(args0.Entries) > 0 {
 		if args0.PreLogIndex > 0 {
-			preLog := this.Logs.Get(args0.PreLogIndex)
-			if preLog.Term != args0.PreLogTerm || preLog.Command == "" {
+			preLog, err := this.Logs.Get(args0.PreLogIndex)
+			if preLog.Term != args0.PreLogTerm || err != nil {
 				if preLog.Command == "" {
 					log.Printf("FOLLOWER(%d)：日志落后于leader(%s)：(FOLLOWER:%d/LEADER:%d)\n",
 						this.CurrentTerm, args0.LeaderID, this.Logs.Size(), args0.PreLogIndex)
@@ -221,13 +227,12 @@ EndFor:
 
 	this.updateCommitIdx(args0)
 
-	time.Sleep(time.Millisecond * time.Duration(rand.Intn(10000)))
-
 	if args0.Entries != nil && len(args0.Entries) > 0 {
 		log.Printf("FOLLOWER(%d)：收到leader(%s)的新日志(Totals: %d, PreTerm: %d, PreIndex: %d, Size: %d)\n",
 			this.CurrentTerm, args0.LeaderID, this.Logs.Size(), args0.PreLogTerm, args0.PreLogIndex, len(args0.Entries))
+
 	} else {
-		log.Printf("FOLLOWER(%d)：收到leader(%s)的心跳信息\n", this.CurrentTerm, args0.LeaderID)
+		//log.Printf("FOLLOWER(%d)：收到leader(%s)的心跳信息\n", this.CurrentTerm, args0.LeaderID)
 	}
 
 	return nil
