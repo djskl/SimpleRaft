@@ -3,6 +3,8 @@ package clog
 import (
 	"sync"
 	"SimpleRaft/utils"
+	"strings"
+	"fmt"
 )
 
 //日志项
@@ -90,4 +92,15 @@ func (this *Manager) RemoveFrom(idx int) {
 	this.lock.Lock()
 	defer this.lock.Unlock()
 	this.logs = this.logs[:idx]
+}
+
+func (this *Manager) ToString() string {
+	this.lock.Lock()
+	defer this.lock.Unlock()
+	var rst []string
+	for _, val := range this.logs{
+		rst = append(rst, val.Command)
+	}
+	s := fmt.Sprintf("[%s]", strings.Join(rst, ", "))
+	return s
 }

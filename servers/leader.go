@@ -198,11 +198,20 @@ func (this *Leader) replicateLog(ip string) {
 				}
 			}
 
-			toSendEntries := this.Logs.GetMany(nextIdx, nextIdx+1)
+			var toSendEntries []clog.LogItem
+
+			if settings.DEBUG {
+				toSendEntries = this.Logs.GetMany(nextIdx, nextIdx+1)
+			}else{
+				toSendEntries = this.Logs.GetFrom(nextIdx)
+			}
+
 			if toSendEntries != nil && len(toSendEntries) > 0 {
 				log.Printf("LEADER(%d)：向%s复制日志(%d)...\n", this.CurrentTerm, ip, nextIdx)
 			} else {
-				//log.Printf("LEADER(%d)：向%s发送心跳信息...\n", this.CurrentTerm, ip)
+				if settings.DEBUG && settings.SHOW_HEARTINFO {
+					log.Printf("LEADER(%d)：向%s发送心跳信息...\n", this.CurrentTerm, ip)
+				}
 			}
 
 			logReq := LogAppArg{
@@ -288,7 +297,9 @@ func (this *Leader) handleLogAck(ip string, nextIndex int, logAck *LogAckArg) {
 	}
 
 	if nextIndex == logAck.LastLogIndex+1 {
-		//log.Printf("LEADER(%d)：收到Follower(%s)的心跳响应！！！\n", this.CurrentTerm, ip)
+		if settings.DEBUG && settings.SHOW_HEARTINFO{
+			log.Printf("LEADER(%d)：收到Follower(%s)的心跳响应！！！\n", this.CurrentTerm, ip)
+		}
 	} else {
 		this.NextIndex.Set(ip, logAck.LastLogIndex+1)
 		this.MatchIndex.Set(ip, logAck.LastLogIndex)

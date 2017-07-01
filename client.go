@@ -3,10 +3,8 @@ package main
 import (
 	"net/rpc"
 	"log"
-	"sync"
-	"math/rand"
 	"strconv"
-	"fmt"
+	"math/rand"
 )
 
 var ALLSERVERS = [5]string{"192.168.16.2", "192.168.16.3", "192.168.16.4", "192.168.16.5", "192.168.16.6"}
@@ -60,7 +58,7 @@ func Submit(cmd string) {
 		log.Printf("命令：%s提交成功!!!\n", cmd)
 	} else {
 		if ack.LeaderIP != "" {
-			//log.Printf("LEADER_IP是：%s，重新提交...\n", ack.LeaderIP)
+			log.Printf("LEADER_IP是：%s，重新提交...\n", ack.LeaderIP)
 			LEADER_IP = ack.LeaderIP
 			Submit(cmd)
 		} else {
@@ -70,18 +68,23 @@ func Submit(cmd string) {
 }
 
 func main() {
-	var wg sync.WaitGroup
-	wg.Add(100)
-	for idx := 0; idx < 100; idx++ {
-		go func() {
-			defer wg.Done()
-			fmt.Printf("-------------------%d-------------------\n", idx)
-			for idy:=0;idy<100;idy++{
-				n := strconv.Itoa(rand.Intn(10))
-				Submit(n)
-			}
-			fmt.Printf("-------------------%d-------------------\n", idx)
-		}()
+
+	for idy:=0;idy<10;idy++{
+		n := strconv.Itoa(rand.Intn(10))
+		Submit(n)
 	}
-	wg.Wait()
+
+	//var wg sync.WaitGroup
+	//wg.Add(100)
+	//for idx := 0; idx < 100; idx++ {
+	//	go func() {
+	//		defer wg.Done()
+	//		for idy:=0;idy<100;idy++{
+	//			n := strconv.Itoa(rand.Intn(10))
+	//			time.Sleep(time.Millisecond * 300)
+	//			Submit(n)
+	//		}
+	//	}()
+	//}
+	//wg.Wait()
 }

@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"SimpleRaft/utils"
 	"log"
+	"fmt"
 )
 
 type Follower struct {
@@ -17,11 +18,16 @@ type Follower struct {
 	VotedFor    string
 
 	chan_timeout chan bool //定时管道
+	chan_commit  chan bool //commit管道
 
 	//角色是否处于激活状态，供角色启动的子协程参考
 	//用指针防止copy
 	active    *utils.AtomicBool
 	chan_role *chan RoleState //角色管道
+
+	//被用户输入, requestVote, heartbeat激活
+	wait_for_log  chan string
+	wait_for_vote chan string
 }
 
 func (this *Follower) Init() error {
@@ -32,6 +38,12 @@ func (this *Follower) Init() error {
 	this.active.Set()
 
 	this.chan_timeout = make(chan bool)
+	this.chan_commit = make(chan bool)
+
+	if settings.DEBUG {
+		this.wait_for_log = make(chan string)
+		this.wait_for_vote = make(chan string)
+	}
 
 	log.Printf("FOLLOWER(%d)：初始化...\n", this.CurrentTerm)
 
@@ -57,24 +69,52 @@ func (this *Follower) StartAllService() {
 
 //定时服务，超时即切换到candidate状态
 func (this *Follower) startTimeOutService() {
+
 	for {
 		if !this.active.IsSet() {
 			break
 		}
+
 		ot := time.Duration(rand.Intn(settings.TIMEOUT_MAX-settings.TIMEOUT_MIN) + settings.TIMEOUT_MIN)
-		//log.Printf("FOLLOWER(%d)：启动计时服务(%d毫秒)...\n", this.CurrentTerm, ot)
+
+		if settings.DEBUG && settings.SHOW_HEARTINFO {
+			log.Printf("FOLLOWER(%d)：启动计时服务(%d毫秒)...\n", this.CurrentTerm, ot)
+		}
+
 		select {
 		case st := <-this.chan_timeout:
 			if st {
-				//log.Printf("FOLLOWER(%d)：暂停计时器...\n", this.CurrentTerm)
+
+				if settings.DEBUG && settings.SHOW_HEARTINFO {
+					log.Printf("FOLLOWER(%d)：暂停计时器...\n", this.CurrentTerm)
+				}
+
 				return
 			} else {
-				//log.Printf("FOLLOWER(%d)：重置计时器...\n", this.CurrentTerm)
+
+				if settings.DEBUG && settings.SHOW_HEARTINFO {
+					log.Printf("FOLLOWER(%d)：重置计时器...\n", this.CurrentTerm)
+				}
+
 				break
 			}
 		case <-time.After(ot * time.Millisecond):
 			if this.active.IsSet() {
-				log.Printf("FOLLOWER(%d)：Leader(%s)一直未响应，开始选举...\n", this.CurrentTerm, this.VotedFor)
+
+				if settings.DEBUG {
+					log.Printf("FOLLOWER(%d)：Leader(%s)一直未响应，是否开始选举?\n", this.CurrentTerm, this.VotedFor)
+					go func() {
+						var s string
+						fmt.Scanln(&s)
+						this.wait_for_vote <- s
+					}()
+					t := <-this.wait_for_vote
+					if t == "N" {
+						break
+					}
+				}
+
+				log.Printf("FOLLOWER(%d)：开始选举...\n", this.CurrentTerm)
 				rolestate := RoleState{settings.CANDIDATE, this.CurrentTerm}
 				*this.chan_role <- rolestate
 			} else {
@@ -104,7 +144,13 @@ func (this *Follower) startLogApplService() {
 				this.CurrentTerm, this.LastApplied, _log.Term, _log.Command)
 		}
 
-		time.Sleep(time.Millisecond * time.Duration(settings.COMMIT_WAIT))
+		select {
+		case <-this.chan_commit:
+			break
+		case <-time.After(time.Millisecond * time.Duration(settings.COMMIT_WAIT)):
+			break
+		}
+
 	}
 	log.Printf("FOLLOWER(%d)：日志应用服务终止！！！\n", this.CurrentTerm)
 }
@@ -116,6 +162,22 @@ func (this *Follower) HandleVoteReq(args0 VoteReqArg, args1 *VoteAckArg) error {
 
 	log.Printf("FOLLOWER(%d)：收到%s的投票请求...\n", this.CurrentTerm, args0.CandidateID)
 
+	if settings.DEBUG {
+		select {
+		case this.wait_for_log <- "y":
+			break
+		default:
+			break
+		}
+
+		select {
+		case this.wait_for_vote <- "N":
+			break
+		default:
+			break
+		}
+	}
+
 	//过期leader直接拒绝
 	if this.CurrentTerm > args0.Term {
 		args1.Term = this.CurrentTerm
@@ -126,30 +188,31 @@ func (this *Follower) HandleVoteReq(args0 VoteReqArg, args1 *VoteAckArg) error {
 
 	this.CurrentTerm = args0.Term
 
-	voteGranted := false
-	if this.VotedFor == args0.CandidateID || this.VotedFor == "" { //比较谁包含的日志记录更新更长
-		lastLogIndex := this.Logs.Size()
-		lastLog, err := this.Logs.Get(lastLogIndex)
-		if err != nil {
+	//if this.VotedFor == args0.CandidateID || this.VotedFor == "" { //比较谁包含的日志记录更新更长
+	var voteGranted bool
+
+	lastLogIndex := this.Logs.Size()
+	lastLog, err := this.Logs.Get(lastLogIndex)
+	if err != nil {
+		voteGranted = true
+	} else {
+		t := lastLog.Term - args0.LastLogTerm
+		switch {
+		case t < 0:
 			voteGranted = true
-		}else{
-			t := lastLog.Term - args0.LastLogTerm
-			switch {
-			case t < 0:
-				voteGranted = true
-			case t > 0:
+		case t > 0:
+			voteGranted = false
+			log.Printf("FOLLOWER(%d)：不支持%s(Term:%d过期)\n", this.CurrentTerm, args0.CandidateID, args0.LastLogTerm)
+		case t == 0:
+			if lastLogIndex > args0.LastLogIndex {
 				voteGranted = false
-				log.Printf("FOLLOWER(%d)：不支持%s(Term:%d过期)\n", this.CurrentTerm, args0.CandidateID, args0.LastLogTerm)
-			case t == 0:
-				if lastLogIndex > args0.LastLogIndex {
-					voteGranted = false
-					log.Printf("FOLLOWER(%d)：不支持%s(日志不够新)\n", this.CurrentTerm, args0.CandidateID)
-				} else {
-					voteGranted = true
-				}
+				log.Printf("FOLLOWER(%d)：不支持%s(日志不够新)\n", this.CurrentTerm, args0.CandidateID)
+			} else {
+				voteGranted = true
 			}
 		}
 	}
+
 	if voteGranted {
 		this.VotedFor = args0.CandidateID
 		args1.Term = this.CurrentTerm
@@ -198,6 +261,23 @@ EndFor:
 	this.CurrentTerm = args0.Term
 
 	if args0.Entries != nil && len(args0.Entries) > 0 {
+
+		if settings.DEBUG {
+			log.Printf("FOLLOWER(%d)：是否开始接收新日志?\n", this.CurrentTerm)
+			go func() {
+				var s string
+				fmt.Scanln(&s)
+				this.wait_for_log <- s
+			}()
+			t := <-this.wait_for_log
+			if t == "N" {
+				args1.LastLogIndex = this.Logs.Size()
+				args1.Term = this.CurrentTerm
+				args1.Success = false
+				return nil
+			}
+		}
+
 		if args0.PreLogIndex > 0 {
 			preLog, err := this.Logs.Get(args0.PreLogIndex)
 			if preLog.Term != args0.PreLogTerm || err != nil {
@@ -231,8 +311,30 @@ EndFor:
 		log.Printf("FOLLOWER(%d)：收到leader(%s)的新日志(Totals: %d, PreTerm: %d, PreIndex: %d, Size: %d)\n",
 			this.CurrentTerm, args0.LeaderID, this.Logs.Size(), args0.PreLogTerm, args0.PreLogIndex, len(args0.Entries))
 
+		if settings.DEBUG {
+			log.Printf("FOLLOWER(%d)：%s\n", this.CurrentTerm, this.Logs.ToString())
+		}
+
 	} else {
-		//log.Printf("FOLLOWER(%d)：收到leader(%s)的心跳信息\n", this.CurrentTerm, args0.LeaderID)
+		if settings.DEBUG {
+			select {
+			case this.wait_for_log <- "y":
+				break
+			default:
+				break
+			}
+
+			select {
+			case this.wait_for_vote <- "N":
+				break
+			default:
+				break
+			}
+			if settings.SHOW_HEARTINFO {
+				log.Printf("FOLLOWER(%d)：收到leader(%s)的心跳信息\n", this.CurrentTerm, args0.LeaderID)
+			}
+
+		}
 	}
 
 	return nil
@@ -250,6 +352,16 @@ func (this *Follower) updateCommitIdx(args0 LogAppArg) error {
 		} else {
 			this.CommitIndex = args0.LeaderCommitIdx
 		}
+
+		go func() {
+			select {
+			case this.chan_commit <- true:
+				break
+			case <-time.After(time.Millisecond * time.Duration(settings.COMMIT_WAIT)):
+				break
+			}
+		}()
+
 	}
 	return nil
 }
