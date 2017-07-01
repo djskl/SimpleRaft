@@ -14,8 +14,10 @@ ENV GOPATH /opt/golang
 CMD ["/bin/bash"]
 
 
+
 ### 创建一个容器共用的局域网
 docker network create -o "com.docker.network.bridge.name"="rafts" --subnet 192.168.16.0/24 rafts
+
 
 
 ### 容器启动命令
